@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { useRequirementsStore } from '@/stores/requirements'
@@ -13,6 +13,18 @@ const { filteredItems, filters } = storeToRefs(store)
 const treeNodes = computed(() => buildFeatureTree(filteredItems.value, filters.value))
 const grouped = computed(() => groupByModule(treeNodes.value))
 
+// 折叠面板展开的模块名数组（可写 ref，v-model 需要）
+const activeNames = ref<string[]>([])
+
+watch(
+  grouped,
+  (groups) => {
+    // 默认只展开第一个分组，其余折叠
+    activeNames.value = groups.length > 0 ? [groups[0].module] : []
+  },
+  { immediate: true },
+)
+
 function onOpenFeature(module: string, feature: string) {
   store.openFeature(module, feature)
 }
@@ -22,30 +34,40 @@ function onOpenFeature(module: string, feature: string) {
   <div class="tree-container">
     <el-empty v-if="grouped.length === 0" description="暂无需求" />
 
-    <div v-for="g in grouped" :key="g.module" class="module-group">
-      <div class="module-title">
-        <span>📦 {{ g.module }}</span>
-        <span class="count">{{ g.features.length }}</span>
-      </div>
-
-      <div
-        v-for="f in g.features"
-        :key="`${f.module}-${f.feature}`"
-        class="feature-card"
-        @click="onOpenFeature(f.module, f.feature)"
+    <el-collapse v-else v-model="activeNames" class="module-collapse">
+      <el-collapse-item
+        v-for="g in grouped"
+        :key="g.module"
+        :name="g.module"
       >
-        <div class="feature-name">{{ f.feature || '（未命名）' }}</div>
-        <div class="feature-meta">
-          <el-tag :type="STATUS_TAG_TYPE[f.latestStatus] as never" size="small" effect="light">
-            {{ STATUS_LABEL[f.latestStatus] }}
-          </el-tag>
-          <span class="meta-info">
-            {{ f.count }} 次迭代 · 最新 {{ formatYymmdd(f.latestDate) }}
+        <template #title>
+          <span class="module-title">
+            📦 {{ g.module }}
+            <el-tag type="info" size="small" effect="plain" class="count-tag">
+              {{ g.features.length }}
+            </el-tag>
           </span>
-          <span class="arrow">›</span>
+        </template>
+
+        <div
+          v-for="f in g.features"
+          :key="`${f.module}-${f.feature}`"
+          class="feature-card"
+          @click="onOpenFeature(f.module, f.feature)"
+        >
+          <div class="feature-name">{{ f.feature || '（未命名）' }}</div>
+          <div class="feature-meta">
+            <el-tag :type="STATUS_TAG_TYPE[f.latestStatus] as never" size="small" effect="light">
+              {{ STATUS_LABEL[f.latestStatus] }}
+            </el-tag>
+            <span class="meta-info">
+              {{ f.count }} 次迭代 · 最新 {{ formatYymmdd(f.latestDate) }}
+            </span>
+            <span class="arrow">›</span>
+          </div>
         </div>
-      </div>
-    </div>
+      </el-collapse-item>
+    </el-collapse>
   </div>
 </template>
 
@@ -53,33 +75,34 @@ function onOpenFeature(module: string, feature: string) {
 .tree-container {
   min-height: 200px;
 }
-.module-group {
-  margin-bottom: 20px;
+.module-collapse {
+  border: none;
 }
-.module-title {
+/* 去掉 collapse-item 默认底边距，用模块间距替代 */
+.module-collapse :deep(.el-collapse-item__header) {
   font-weight: 600;
   font-size: 14px;
-  color: #374151;
-  padding: 6px 8px;
   background: #f9fafb;
   border-radius: 4px;
-  margin-bottom: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.count {
-  background: #e5e7eb;
-  color: #6b7280;
-  border-radius: 10px;
   padding: 0 8px;
-  font-size: 12px;
+  height: 36px;
+}
+.module-collapse :deep(.el-collapse-item__wrap) {
+  border: none;
+  padding: 8px 0 0 16px;
+}
+.module-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.count-tag {
+  margin-left: 4px;
 }
 .feature-card {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   padding: 10px 14px;
-  margin-left: 16px;
   margin-bottom: 8px;
   cursor: pointer;
   transition:

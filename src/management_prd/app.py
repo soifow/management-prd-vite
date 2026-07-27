@@ -24,7 +24,7 @@ from management_prd.services.storage_service import StorageService
 logger = logging.getLogger(__name__)
 
 WINDOW_TITLE = "需求记录"
-WINDOW_WIDTH = 1200
+WINDOW_WIDTH = 1350
 WINDOW_HEIGHT = 800
 DEV_SERVER_URL = "http://localhost:5173"
 FRONTEND_DIST_REL = "frontend/dist/index.html"

@@ -98,7 +98,6 @@ async function onExport() {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 .sep {

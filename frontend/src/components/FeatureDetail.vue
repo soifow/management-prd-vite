@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Back, Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete } from '@element-plus/icons-vue'
 import { MdEditor } from 'md-editor-v3'
 
 import { useRequirementsStore } from '@/stores/requirements'
@@ -73,65 +73,64 @@ function onBack() {
 
 <template>
   <div v-if="selectedFeature" class="detail">
-    <div class="head">
-      <el-button :icon="Back" @click="onBack">返回</el-button>
-      <span class="title">
-        功能：{{ selectedFeature.feature || '（未命名）' }}
+    <el-page-header class="head" @back="onBack">
+      <template #content>
+        <span class="title">功能：{{ selectedFeature.feature || '（未命名）' }}</span>
         <span v-if="selectedFeature.module" class="module">（{{ selectedFeature.module }}）</span>
-      </span>
-      <span class="spacer" />
-      <el-button :icon="Plus" type="primary" @click="onNewIteration">新建迭代</el-button>
-    </div>
+      </template>
+      <template #extra>
+        <el-button :icon="Plus" type="primary" @click="onNewIteration">新建迭代</el-button>
+      </template>
+    </el-page-header>
 
     <div class="body">
       <!-- 左：md-editor -->
       <div class="editor-pane">
-        <div v-if="selectedIteration" class="iter-head">
-          <span class="iter-date">📅 {{ formatYymmdd(selectedIteration.date) }}</span>
-          <el-select v-model="bufferStatus" size="small" style="width: 160px">
-            <el-option v-for="s in statusOptions" :key="s" :label="STATUS_LABEL[s]" :value="s" />
-          </el-select>
-          <el-button type="primary" size="small" @click="onSave">保存</el-button>
-        </div>
-        <MdEditor
-          v-if="selectedIteration"
-          v-model="bufferContent"
-          :preview="false"
-          style="height: calc(100% - 48px)"
-        />
+        <template v-if="selectedIteration">
+          <div class="iter-head">
+            <span class="iter-date">📅 {{ formatYymmdd(selectedIteration.date) }}</span>
+            <el-select v-model="bufferStatus" size="small" style="width: 160px">
+              <el-option v-for="s in statusOptions" :key="s" :label="STATUS_LABEL[s]" :value="s" />
+            </el-select>
+            <el-button type="primary" size="small" @click="onSave">保存</el-button>
+          </div>
+          <MdEditor v-model="bufferContent" :preview="false" class="editor" />
+        </template>
         <el-empty v-else description="该功能暂无迭代记录" />
       </div>
 
       <!-- 右：el-timeline -->
       <div class="timeline-pane">
         <div class="tl-title">迭代时间轴（点击跳转）</div>
-        <el-timeline class="tl">
-          <el-timeline-item
-            v-for="it in [...currentIterations].reverse()"
-            :key="it.id"
-            :timestamp="formatYymmdd(it.date)"
-            :type="STATUS_TAG_TYPE[it.status] as never"
-            placement="top"
-          >
-            <div
-              class="tl-node"
-              :class="{ active: it.id === selectedIterationId }"
-              @click="onJumpTo(it.id)"
+        <div class="tl-scroll">
+          <el-timeline class="tl">
+            <el-timeline-item
+              v-for="it in [...currentIterations].reverse()"
+              :key="it.id"
+              :timestamp="formatYymmdd(it.date)"
+              :type="STATUS_TAG_TYPE[it.status] as never"
+              placement="top"
             >
-              <span class="tl-content">{{ it.content || '（空）' }}</span>
-              <el-tag :type="STATUS_TAG_TYPE[it.status] as never" size="small">
-                {{ STATUS_LABEL[it.status] }}
-              </el-tag>
-              <el-button
-                :icon="Delete"
-                link
-                size="small"
-                type="danger"
-                @click.stop="onDeleteIteration(it.id)"
-              />
-            </div>
-          </el-timeline-item>
-        </el-timeline>
+              <div
+                class="tl-node"
+                :class="{ active: it.id === selectedIterationId }"
+                @click="onJumpTo(it.id)"
+              >
+                <span class="tl-content">{{ it.content || '（空）' }}</span>
+                <el-tag :type="STATUS_TAG_TYPE[it.status] as never" size="small">
+                  {{ STATUS_LABEL[it.status] }}
+                </el-tag>
+                <el-button
+                  :icon="Delete"
+                  link
+                  size="small"
+                  type="danger"
+                  @click.stop="onDeleteIteration(it.id)"
+                />
+              </div>
+            </el-timeline-item>
+          </el-timeline>
+        </div>
       </div>
     </div>
 
@@ -146,9 +145,7 @@ function onBack() {
   flex-direction: column;
 }
 .head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-shrink: 0;
   margin-bottom: 12px;
 }
 .title {
@@ -159,9 +156,6 @@ function onBack() {
   color: #6b7280;
   font-weight: 400;
   font-size: 13px;
-}
-.spacer {
-  flex: 1;
 }
 .body {
   flex: 1;
@@ -174,8 +168,16 @@ function onBack() {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+}
+/* md-editor 占据编辑区剩余高度，不随内容撑开 */
+.editor {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 }
 .iter-head {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -189,15 +191,23 @@ function onBack() {
   flex: 1;
   min-width: 220px;
   max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-left: 1px solid #e5e7eb;
   padding-left: 12px;
-  overflow: auto;
 }
 .tl-title {
+  flex-shrink: 0;
   font-weight: 600;
   font-size: 13px;
   color: #374151;
   margin-bottom: 10px;
+}
+.tl-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 .tl {
   padding: 0 4px;

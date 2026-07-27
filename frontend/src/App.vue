@@ -43,8 +43,8 @@ watch(activeProjectId, async (id) => {
       <ProjectSidebar />
     </el-aside>
     <el-main class="main">
-      <FilterToolbar v-if="!selectedFeature" />
-      <div class="content">
+      <FilterToolbar v-if="!selectedFeature" class="toolbar-sticky" />
+      <div class="content" :class="{ 'content-full': selectedFeature }">
         <FeatureDetail v-if="selectedFeature" />
         <RequirementTree v-else />
       </div>
@@ -62,15 +62,39 @@ watch(activeProjectId, async (id) => {
   overflow: auto;
 }
 .main {
-  padding: 16px 20px;
-  overflow: auto;
+  padding: 0;
+  overflow: hidden;
   background: #f5f7fa;
+  display: flex;
+  flex-direction: column;
+}
+/* 顶部筛选栏：固顶，不随内容滚动 */
+.toolbar-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-shrink: 0;
+  padding: 12px 20px;
+  background: #f5f7fa;
+  margin-bottom: 0;
 }
 .content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   background: #ffffff;
   border-radius: 6px;
+  margin: 0 20px 16px;
   padding: 16px;
-  min-height: 600px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+/* 详情页：撑满视口高度，内部走 flex 分配 */
+.content-full {
+  overflow: hidden;
+  margin: 0;
+  border-radius: 0;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
 }
 </style>

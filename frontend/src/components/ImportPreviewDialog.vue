@@ -79,14 +79,14 @@ function toggleGroup(items: ParsedRequirement[], val: boolean) {
     </div>
 
     <div class="groups">
-      <div v-for="[moduleName, reqs] in grouped" :key="moduleName" class="group">
+      <el-card v-for="[moduleName, reqs] in grouped" :key="moduleName" class="group" shadow="never">
         <div class="group-head">
           <el-checkbox
             :model-value="reqs.every((r) => r.selected)"
             @update:model-value="(v: boolean) => toggleGroup(reqs, v)"
           />
           <span class="group-name">{{ moduleName }}</span>
-          <span class="group-count">{{ reqs.length }}</span>
+          <el-tag type="info" size="small" effect="plain">{{ reqs.length }}</el-tag>
         </div>
         <div v-for="(r, idx) in reqs" :key="idx" class="req-row">
           <el-checkbox v-model="r.selected" />
@@ -98,7 +98,7 @@ function toggleGroup(items: ParsedRequirement[], val: boolean) {
             {{ r.date ? r.date.slice(2).replace(/-/g, '') : '' }}
           </span>
         </div>
-      </div>
+      </el-card>
     </div>
 
     <template #footer>
@@ -131,9 +131,9 @@ function toggleGroup(items: ParsedRequirement[], val: boolean) {
 }
 .group {
   margin-bottom: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 8px 12px;
+}
+.group :deep(.el-card__body) {
+  padding: 10px 14px;
 }
 .group-head {
   display: flex;
@@ -145,13 +145,6 @@ function toggleGroup(items: ParsedRequirement[], val: boolean) {
 .group-name {
   font-weight: 600;
   font-size: 14px;
-}
-.group-count {
-  background: #e5e7eb;
-  border-radius: 10px;
-  padding: 0 8px;
-  font-size: 12px;
-  color: #6b7280;
 }
 .req-row {
   display: flex;
