@@ -9,7 +9,7 @@
 **架构方案：Vue 3 + Vite（前端 UI）+ PyWebView（Python 宿主）+ PyInstaller（打包分发）**
 
 - 前端使用 Vue 3 生态构建现代化 SPA 界面
-- 后端使用 Python 3.11+ 处理业务逻辑、LLM 调用与数据持久化
+- 后端使用 Python 3.11+ 处理业务逻辑与数据持久化
 - PyWebView 作为桥接层，将前端 UI 嵌入原生窗口，并通过 `window.pywebview.api` 暴露 Python 后端接口
 - PyInstaller 负责将整个应用打包为独立的桌面可执行文件
 
@@ -49,3 +49,43 @@
 - **导出（v3）**：每条 RequirementItem 一段（单 date），按 `date→module→feature` 分组、`1./2./3.` 编号、尾标 `【{STATUS_LABEL}】`；往返幂等。
 - **删除二次确认**：项目/迭代均 `ElMessageBox.confirm`。
 - **YYMMDD 世纪 pivot**：`yy<=80 → 20yy else 19yy`。
+
+### SQLite Migration Rule
+
+修改 SQLite 表结构时，必须遵循以下流程：先备份表中现有数据 → 删除旧表 → 重新创建新表 → 将备份的数据写回新表。禁止直接删除表而不保留历史数据。
+
+**Why:** 项目使用 SQLite 数据库，修改表结构（如新增/删除列、修改字段类型）通常需要 DROP TABLE 后重建，无法像 MySQL 那样用 ALTER TABLE 灵活变更。直接删除会导致历史数据永久丢失。
+
+**How to apply:** 每次涉及 SQLite 表结构变更（migration）时，在代码中或操作步骤中必须包含数据备份和回填逻辑。例如：
+1. `SELECT * FROM old_table` → 保存到临时变量/临时表
+2. `DROP TABLE old_table`
+3. `CREATE TABLE new_table (...)` 使用新结构
+4. 将备份数据 `INSERT INTO new_table` 回填（字段映射到新结构）
+
+### SQLite Direct Access Rule（2026-07-28）
+
+项目使用 SQLite 数据库，数据库文件为 `requment.db`。所有数据库操作必须直接操作 `requment.db` 文件，禁止调用任何名称以 `-db` 结尾的 MCP 服务（如 `anal-business-db`、`anal-system-db`、`gridfoundation-db`、`jnfs-db` 等）。
+
+**Why:** 项目的数据库是本地 SQLite 文件，MCP 数据库服务连接的是其他数据库实例，与项目无关，调用会导致操作错误的数据库。
+
+**How to apply:** 需要查询或修改数据库时，通过代码中已有的数据库操作模块或使用 `sqlite3` 命令行工具直接操作 `requment.db`，绝不使用任何名称以 `-db` 结尾的 MCP 服务。
+
+### Schema 版本迁移规则（Versioned Migration Rule）
+
+**凡是对数据库表结构有任何变更 —— 新增/删除/重命名列、修改列类型或约束（NOT NULL/DEFAULT/UNIQUE）、新增/删除索引、新增/删除表 —— 都必须把 `CURRENT_DB_SCHEMA_VERSION` +1，并在 `DbService._self_check_schema()` 内追加对应的 `if version < N:` 迁移分支，绝不能只改建表常量。** 仅修改 `_meta` 种子（`INSERT OR IGNORE`）或纯数据更新不算结构变更，不需要版本迁移。
+
+**Why:** 本项目建表用 `CREATE TABLE IF NOT EXISTS`，对已存在的表是空操作，老库拿不到新结构。且 `_self_check_schema()` 目前**只做版本号校准、不做 schema 反射对比——没有自动兜底**：漏写迁移分支，老库会静默停留在旧结构，运行到相关 SQL 时才炸。
+
+**How to apply:**
+1. `db_service.py` 里 `CURRENT_DB_SCHEMA_VERSION` +1。
+2. 在 `_self_check_schema(conn)` 追加 `if version < N:` 分支。涉及删列/改列/改约束时按「SQLite Migration Rule」重建表范式：备份 → `DROP TABLE` → `CREATE TABLE`(新结构) → 回填，绝不直接 DROP 不备份。分支开头可用 `PRAGMA table_info(表)` 检测列、`PRAGMA index_list(表)` 检测索引做幂等（注意 `table_info` 只返回列定义、查不到索引）。
+3. 同步更新模块级建表常量 `_CREATE_PROJECTS` / `_CREATE_REQUIREMENTS` / `_INDEXES`，让全新库直接建出最新结构。
+4. 用老库 + 全新库各启动一次验证。
+
+**判定速查：** 改建表常量任何一行结构定义 → 必须 +1 并加分支；只改 `INSERT OR IGNORE` 种子值或纯 UPDATE → 不需要。拿不准时，默认按「需要」处理。
+
+### 一次性数据迁移标记规则（migrated_json）
+
+本项目用 `_meta.migrated_json` 作为 data.json → SQLite 一次性迁移的守卫：`_migrate_json_if_present()` 在该键为 `'1'` 时直接跳过；成功才置 `'1'` 并删除 `data.json`，失败则回滚、不置标记、不删文件（下次启动重试，`INSERT OR IGNORE` 保证幂等）。
+
+**How to apply:** 未来新增任何「一次性数据迁移」时沿用此模式——在 `_meta` 加一个独立标记键做守卫，成功才置位、失败可重入，切勿用时间或外部状态判断是否已迁移。
