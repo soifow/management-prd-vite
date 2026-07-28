@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 
@@ -7,15 +7,19 @@ import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
 import { whenReady } from '@/api'
 
+import AppNavMenu from '@/components/AppNavMenu.vue'
 import ProjectSidebar from '@/components/ProjectSidebar.vue'
 import FilterToolbar from '@/components/FilterToolbar.vue'
 import RequirementTree from '@/components/RequirementTree.vue'
 import FeatureDetail from '@/components/FeatureDetail.vue'
+import SettingsDialog from '@/components/SettingsDialog.vue'
 
 const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
 const { selectedFeature } = storeToRefs(requirementsStore)
+
+const settingsVisible = ref(false)
 
 onMounted(async () => {
   try {
@@ -33,12 +37,20 @@ watch(activeProjectId, async (id) => {
     } catch (e) {
       ElMessage.error(e instanceof Error ? e.message : '加载项目失败')
     }
+  } else {
+    // 没有可用项目（如唯一项目被删除）：清空右侧数据，让 el-empty 显示
+    requirementsStore.reset()
   }
 })
+
+function onNavSelect(key: 'workspace' | 'settings') {
+  if (key === 'settings') settingsVisible.value = true
+}
 </script>
 
 <template>
   <el-container class="layout">
+    <AppNavMenu @select="onNavSelect" />
     <el-aside width="260px" class="aside">
       <ProjectSidebar />
     </el-aside>
@@ -49,6 +61,8 @@ watch(activeProjectId, async (id) => {
         <RequirementTree v-else />
       </div>
     </el-main>
+
+    <SettingsDialog v-model="settingsVisible" />
   </el-container>
 </template>
 

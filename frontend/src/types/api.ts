@@ -18,3 +18,11 @@ export function isApiErrorEnvelope(value: unknown): value is ApiErrorEnvelope {
     typeof (value as { error?: unknown }).error === 'string'
   )
 }
+
+/** 存储位置信息（get_storage_info / migrate_storage 返回）。 */
+export interface StorageInfo {
+  /** 当前数据存储目录绝对路径 */
+  storage_dir: string
+  /** 是否使用默认位置（未自定义） */
+  is_default: boolean
+}

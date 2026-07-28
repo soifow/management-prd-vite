@@ -31,9 +31,11 @@ def main() -> int:
 
         return run(dev=args.dev)
     elif args.command == "config-check":
-        from management_prd.services.storage_service import default_data_path
+        from management_prd.services.bootstrap_service import BootstrapService
 
-        path = default_data_path()
+        storage_dir = BootstrapService().resolve_storage_dir()
+        path = storage_dir / "data.json"
+        print(f"存储目录: {storage_dir}")
         print(f"数据文件路径: {path}")
         print(f"父目录存在: {path.parent.exists()}")
         return 0

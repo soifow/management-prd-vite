@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import threading
 from datetime import date, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from management_prd.errors import NotFoundError
@@ -47,6 +49,7 @@ class ProjectService:
 
     def __init__(self, storage: StorageService) -> None:
         self._storage = storage
+        self._bootstrap = storage.bootstrap
         self._data: AppData | None = None
         self._lock = threading.Lock()
 
@@ -247,6 +250,18 @@ class ProjectService:
         self._persist()
         return project
 
+    def apply_import_as_new_project(
+        self,
+        name: str,
+        parsed: list[ParsedRequirement],
+    ) -> Project:
+        """新建项目并把导入需求全部写入（用于「导入新建项目」）。
+
+        项目名通常取自导入文件名。新建后复用 :meth:`apply_import` 的去重合并逻辑。
+        """
+        summary = self.create_project(name)
+        return self.apply_import(summary.id, parsed)
+
     # ---------- 汇总 ----------
 
     def _summary(self, project: Project) -> ProjectSummary:
@@ -286,3 +301,67 @@ class ProjectService:
         """更新项目的 updated_at。"""
         project = self._find_project(project_id)
         project.updated_at = _now()
+
+    # ---------- 存储位置 ----------
+
+    def get_storage_info(self) -> dict[str, object]:
+        """返回当前存储位置信息（供设置弹窗展示）。"""
+        storage_dir = str(self._storage.storage_dir)
+        return {
+            "storage_dir": storage_dir,
+            "is_default": self._bootstrap.is_default(),
+        }
+
+    def migrate_storage_dir(self, parent_dir: str) -> dict[str, object]:
+        """将整个 storage_dir 迁移到用户选定目录下的专属子目录，更新指针并重载。
+
+        ``parent_dir`` 为用户选定的目录；实际数据落入其下的
+        ``management-prd-storage`` 子目录（由 :meth:`BootstrapService.custom_storage_dir`
+        决定）。这样迁移内容与用户所选目录中的其他文件隔离：既不覆盖所选目录里
+        的同名文件，删除旧位置时也不会误伤所选目录里的无关内容。
+
+        步骤：
+        1. 计算目标子目录；与当前位置相同，或已存在且非空则拒绝
+        2. 确保数据已落盘
+        3. 复制旧 storage_dir 内容到目标子目录（shutil.copytree）
+        4. 更新 bootstrap.json 指针
+        5. 删除旧 storage_dir（程序专属目录，安全）
+        6. 重载 StorageService 指向新 data.json
+        7. 清空内存缓存，下次 _ensure_data 读新位置
+        """
+        new_path = self._bootstrap.custom_storage_dir(parent_dir).resolve()
+        old_path = self._storage.storage_dir.resolve()
+
+        if new_path == old_path:
+            raise ValueError("新位置与当前位置相同")
+
+        # 目标子目录已存在且非空 → 拒绝，避免污染既有内容或被覆盖
+        if new_path.exists() and any(new_path.iterdir()):
+            raise ValueError(f"目标目录已存在且非空: {new_path}")
+
+        # 1. 确保最新数据落盘
+        self._persist()
+
+        # 2. 复制整个目录到目标子目录
+        new_path.mkdir(parents=True, exist_ok=True)
+        for child in old_path.iterdir():
+            dest = new_path / child.name
+            if child.is_dir():
+                shutil.copytree(str(child), str(dest), dirs_exist_ok=True)
+            else:
+                shutil.copy2(str(child), str(dest))
+
+        # 3. 更新指针
+        self._bootstrap.write_storage_dir(str(new_path))
+
+        # 4. 删除旧目录（程序专属，仅含本应用数据）
+        shutil.rmtree(str(old_path), ignore_errors=True)
+
+        # 5. 重定位 StorageService
+        self._storage.relocate(new_path / "data.json")
+
+        # 6. 清空内存缓存
+        self._data = None
+
+        logger.info("存储目录已迁移: %s -> %s", old_path, new_path)
+        return self.get_storage_info()

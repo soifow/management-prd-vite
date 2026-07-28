@@ -153,14 +153,22 @@ class WebApi:
     # ---------- 导入/导出 ----------
 
     def pick_and_parse_import(self) -> object:
-        """弹打开文件框，解析为 ParsedRequirement 列表。取消返回 None。"""
+        """弹打开文件框，解析为 ParsedRequirement 列表。取消返回 None。
+
+        返回 ``{"requirements": [...], "filename": "xxx"}`` 以便前端用文件名推测项目名。
+        """
         try:
             picked = self._open_text_file()
             if not picked:
                 return None
-            text = Path(picked).read_text(encoding="utf-8")
+            path = Path(picked)
+            text = path.read_text(encoding="utf-8")
             parsed: ParsedImport = parse_import(text)
-            return [r.model_dump(mode="json") for r in parsed.requirements]
+            filename_stem = path.stem
+            return {
+                "requirements": [r.model_dump(mode="json") for r in parsed.requirements],
+                "filename": filename_stem,
+            }
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
@@ -171,6 +179,17 @@ class WebApi:
 
             parsed_reqs = [ParsedRequirement.model_validate(r) for r in requirements]
             project = self._project_service.apply_import(project_id, parsed_reqs)
+            return project.model_dump(mode="json")
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def apply_import_as_new_project(self, name: str, requirements: list[dict[str, object]]) -> object:
+        """新建项目并导入需求（项目名取自导入文件名）。"""
+        try:
+            from management_prd.models.data import ParsedRequirement
+
+            parsed_reqs = [ParsedRequirement.model_validate(r) for r in requirements]
+            project = self._project_service.apply_import_as_new_project(name, parsed_reqs)
             return project.model_dump(mode="json")
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
@@ -193,6 +212,33 @@ class WebApi:
             logger.info("需求已导出: %s", target)
             return str(target)
         except (ExportError, NotFoundError, StorageError, ValueError) as exc:
+            return _err(exc)
+
+    # ---------- 存储位置 ----------
+
+    def get_storage_info(self) -> object:
+        """返回当前存储目录信息。"""
+        try:
+            return self._project_service.get_storage_info()
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def pick_storage_dir(self) -> object:
+        """弹文件夹选择对话框，返回所选路径或 None。"""
+        try:
+            return self._open_folder_dialog()
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def migrate_storage(self, new_dir: str) -> object:
+        """迁移存储目录：在 new_dir 下创建 management-prd-storage 子目录并迁入。
+
+        ``new_dir`` 为用户选定的目录（父目录）；实际数据落入其下的
+        ``management-prd-storage`` 专属子目录，与所选目录内其他文件隔离。
+        """
+        try:
+            return self._project_service.migrate_storage_dir(new_dir)
+        except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
     # ---------- 内部工具 ----------
@@ -268,6 +314,17 @@ class WebApi:
             save_filename=suggested,
             file_types=["文本文件 (*.txt)", "所有文件 (*.*)"],
         )
+        if not result:
+            return None
+        if isinstance(result, (list, tuple)):
+            return str(result[0]) if result else None
+        return str(result)
+
+    def _open_folder_dialog(self) -> str | None:
+        """调用 webview 文件夹选择对话框，返回所选目录或 None。"""
+        if self._window is None:
+            raise ManagementPrdError("WebApi 窗口未注入，无法弹对话框")
+        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
         if not result:
             return None
         if isinstance(result, (list, tuple)):

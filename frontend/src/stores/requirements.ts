@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import {
   applyImport,
+  applyImportAsNewProject,
   createRequirement,
   deleteRequirement,
   exportProject,
@@ -15,7 +16,7 @@ import {
   updateRequirement,
 } from '@/api'
 import type { CreateRequirementInput, UpdateRequirementInput } from '@/api'
-import type { Project, ParsedRequirement, RequirementItem, RequirementStatus } from '@/types'
+import type { Project, ParsedRequirement, PickParseResult, RequirementItem, RequirementStatus } from '@/types'
 import { useRequirementFilter } from '@/composables/useRequirementFilter'
 
 /** 当前选中的功能（详情页入口）。 */
@@ -93,6 +94,13 @@ export const useRequirementsStore = defineStore('requirements', () => {
     selectedIterationId.value = null
   }
 
+  /** 清空当前项目数据与详情状态（项目被删除/无选中项目时调用）。 */
+  function reset() {
+    project.value = null
+    modules.value = []
+    closeFeature()
+  }
+
   function selectIteration(id: string) {
     selectedIterationId.value = id
   }
@@ -151,7 +159,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   // ── 导入 / 导出 ──
 
-  async function pickAndImport(): Promise<ParsedRequirement[] | null> {
+  async function pickAndImport(): Promise<PickParseResult | null> {
     return await pickAndParseImport()
   }
 
@@ -159,6 +167,11 @@ export const useRequirementsStore = defineStore('requirements', () => {
     if (!project.value) return
     project.value = await applyImport(project.value.id, requirements)
     modules.value = await listModules(project.value.id)
+  }
+
+  /** 新建项目并将导入需求写入，返回新建的项目（后续由调用方刷新并选中）。 */
+  async function applyAsNewProject(name: string, requirements: ParsedRequirement[]): Promise<Project> {
+    return await applyImportAsNewProject(name, requirements)
   }
 
   async function exportCurrent(): Promise<string | null> {
@@ -181,6 +194,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     openFeature,
     loadIterations,
     closeFeature,
+    reset,
     selectIteration,
     createIteration,
     updateIteration,
@@ -188,6 +202,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     deleteIteration,
     pickAndImport,
     apply,
+    applyAsNewProject,
     exportCurrent,
     listFeatures,
   }

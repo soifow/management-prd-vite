@@ -3,7 +3,8 @@
  */
 
 import { isApiErrorEnvelope } from '@/types/api'
-import type { ParsedRequirement } from '@/types/import'
+import type { StorageInfo } from '@/types/api'
+import type { ParsedRequirement, PickParseResult } from '@/types/import'
 import type { Project, ProjectSummary } from '@/types/project'
 import type { RequirementItem, RequirementStatus } from '@/types/requirement'
 
@@ -120,7 +121,7 @@ export const deleteRequirement = (itemId: string): Promise<boolean> =>
 
 // ── 导入 / 导出 ──────────────────────────────────────────────
 
-export const pickAndParseImport = (): Promise<ParsedRequirement[] | null> =>
+export const pickAndParseImport = (): Promise<PickParseResult | null> =>
   invoke(() => bridge().pick_and_parse_import())
 
 export const applyImport = (
@@ -128,5 +129,22 @@ export const applyImport = (
   requirements: ParsedRequirement[],
 ): Promise<Project> => invoke(() => bridge().apply_import(projectId, requirements))
 
+export const applyImportAsNewProject = (
+  name: string,
+  requirements: ParsedRequirement[],
+): Promise<Project> =>
+  invoke(() => bridge().apply_import_as_new_project(name, requirements))
+
 export const exportProject = (projectId: string): Promise<string | null> =>
   invoke(() => bridge().export_project(projectId))
+
+// ── 存储位置 ──────────────────────────────────────────────
+
+export const getStorageInfo = (): Promise<StorageInfo> =>
+  invoke(() => bridge().get_storage_info())
+
+export const pickStorageDir = (): Promise<string | null> =>
+  invoke(() => bridge().pick_storage_dir())
+
+export const migrateStorage = (newDir: string): Promise<StorageInfo> =>
+  invoke(() => bridge().migrate_storage(newDir))

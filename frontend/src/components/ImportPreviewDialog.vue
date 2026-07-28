@@ -3,13 +3,23 @@ import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { useRequirementsStore } from '@/stores/requirements'
+import { useProjectsStore } from '@/stores/projects'
 import type { RequirementStatus, ParsedRequirement } from '@/types'
 import { STATUS_LABEL } from '@/types/requirement'
 
 const store = useRequirementsStore()
+const projectsStore = useProjectsStore()
 const visible = ref(false)
 const requirements = ref<ParsedRequirement[]>([])
 const defaultStatus = ref<RequirementStatus>('done')
+
+// 导入模式：current=导入当前项目；new=新建项目并导入（项目名可编辑，取自文件名）
+const mode = ref<'current' | 'new'>('current')
+const projectName = ref('')
+
+const dialogTitle = computed(() =>
+  mode.value === 'new' ? '导入新建项目' : '导入当前项目',
+)
 
 // 按模块分组展示
 const grouped = computed(() => {
@@ -29,9 +39,11 @@ const statusOptions: RequirementStatus[] = [
   'deferred',
 ]
 
-function open(parsed: ParsedRequirement[]) {
+function open(parsed: ParsedRequirement[], m: 'current' | 'new' = 'current', filename = '') {
   requirements.value = parsed.map((r) => ({ ...r }))
   defaultStatus.value = 'done'
+  mode.value = m
+  projectName.value = filename
   visible.value = true
 }
 
@@ -53,9 +65,21 @@ async function onApply() {
     ElMessage.warning('请至少选择一项')
     return
   }
+  if (mode.value === 'new' && !projectName.value.trim()) {
+    ElMessage.warning('项目名不能为空')
+    return
+  }
   try {
-    await store.apply(selected)
-    ElMessage.success(`已导入 ${selected.length} 条需求`)
+    if (mode.value === 'new') {
+      const project = await store.applyAsNewProject(projectName.value.trim(), selected)
+      // 刷新左侧列表并选中新项目
+      await projectsStore.loadSummaries()
+      projectsStore.select(project.id)
+      ElMessage.success(`已新建项目「${project.name}」并导入 ${selected.length} 条需求`)
+    } else {
+      await store.apply(selected)
+      ElMessage.success(`已导入 ${selected.length} 条需求`)
+    }
     visible.value = false
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '导入失败')
@@ -68,7 +92,12 @@ function toggleGroup(items: ParsedRequirement[], val: boolean) {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="导入预览" width="720px">
+  <el-dialog v-model="visible" :title="dialogTitle" width="720px">
+    <div v-if="mode === 'new'" class="name-row">
+      <span class="label">项目名：</span>
+      <el-input v-model="projectName" placeholder="项目名（取自导入文件名，可修改）" style="width: 320px" />
+    </div>
+
     <div class="bar">
       <span class="label">默认状态（应用于非 to do 段的项）：</span>
       <el-select v-model="defaultStatus" style="width: 160px" @change="applyDefaultStatus">
@@ -103,12 +132,20 @@ function toggleGroup(items: ParsedRequirement[], val: boolean) {
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" @click="onApply">应用导入</el-button>
+      <el-button type="primary" @click="onApply">
+        {{ mode === 'new' ? '新建并导入' : '应用导入' }}
+      </el-button>
     </template>
   </el-dialog>
 </template>
 
 <style scoped>
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
 .bar {
   display: flex;
   align-items: center;

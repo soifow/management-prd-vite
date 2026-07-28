@@ -3,7 +3,7 @@
  */
 
 import type { ApiErrorEnvelope } from './api'
-import type { ParsedRequirement } from './import'
+import type { ParsedRequirement, PickParseResult } from './import'
 import type { Project, ProjectSummary } from './project'
 import type { RequirementItem, RequirementStatus } from './requirement'
 
@@ -55,12 +55,21 @@ export interface PyWebViewApi {
   delete_requirement(item_id: string): Promise<boolean | ApiErrorEnvelope>
 
   // ── 导入 / 导出 ──
-  pick_and_parse_import(): Promise<ParsedRequirement[] | null | ApiErrorEnvelope>
+  pick_and_parse_import(): Promise<PickParseResult | null | ApiErrorEnvelope>
   apply_import(
     project_id: string,
     requirements: ParsedRequirement[],
   ): Promise<Project | ApiErrorEnvelope>
+  apply_import_as_new_project(
+    name: string,
+    requirements: ParsedRequirement[],
+  ): Promise<Project | ApiErrorEnvelope>
   export_project(project_id: string): Promise<string | null | ApiErrorEnvelope>
+
+  // ── 存储位置 ──
+  get_storage_info(): Promise<StorageInfo | ApiErrorEnvelope>
+  pick_storage_dir(): Promise<string | null | ApiErrorEnvelope>
+  migrate_storage(new_dir: string): Promise<StorageInfo | ApiErrorEnvelope>
 }
 
 declare global {
