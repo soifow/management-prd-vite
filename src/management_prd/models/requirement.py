@@ -23,7 +23,7 @@ class RequirementStatus(StrEnum):
 # 状态中文标签：导出尾标 / 前端标签 / 导入解析均使用此映射。
 STATUS_LABEL: dict[RequirementStatus, str] = {
     RequirementStatus.TODO: "to do",
-    RequirementStatus.UI_DONE_WAITING_BACKEND: "UI完成等待后端",
+    RequirementStatus.UI_DONE_WAITING_BACKEND: "等待对接",
     RequirementStatus.DONE: "完成",
     RequirementStatus.DEFERRED: "暂缓",
 }

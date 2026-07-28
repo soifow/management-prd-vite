@@ -24,7 +24,9 @@ from management_prd.services.storage_service import StorageService
 logger = logging.getLogger(__name__)
 
 WINDOW_TITLE = "需求记录"
-WINDOW_WIDTH = 1350
+# 左侧固定占 64px(AppNavMenu) + 260px(ProjectSidebar)；1350 是未加 AppNavMenu 时的内容宽度，
+# 加 64px 补偿左侧导航栏，避免右侧「新建需求」等按钮折行。
+WINDOW_WIDTH = 1414
 WINDOW_HEIGHT = 800
 DEV_SERVER_URL = "http://localhost:5173"
 FRONTEND_DIST_REL = "frontend/dist/index.html"

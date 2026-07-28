@@ -1,21 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
+import { nextTick, onMounted, ref, useTemplateRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder } from '@element-plus/icons-vue'
 
 import { useSettingsStore } from '@/stores/settings'
 
-const props = defineProps<{ modelValue: boolean }>()
-const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
+const emit = defineEmits<{
+  (e: 'save'): void
+  (e: 'cancel'): void
+}>()
 
 const settingsStore = useSettingsStore()
 const { storageInfo, loading } = storeToRefs(settingsStore)
-
-const visible = computed({
-  get: () => props.modelValue,
-  set: (v) => emit('update:modelValue', v),
-})
 
 // 分组定义（未来追加分组只需在此扩展）
 const groups = [
@@ -25,10 +22,8 @@ const groups = [
 const activeKey = ref<string>(groups[0].key)
 const scrollRef = useTemplateRef<HTMLDivElement>('scrollRef')
 
-// 打开时加载存储信息 + 回到首组
-watch(visible, async (v) => {
-  if (!v) return
-  activeKey.value = groups[0].key
+// 进入设置页：加载存储信息 + 回到首组
+onMounted(async () => {
   await settingsStore.loadStorageInfo()
   await nextTick()
   if (scrollRef.value) scrollRef.value.scrollTop = 0
@@ -73,10 +68,20 @@ async function onChangeStorage() {
     ElMessage.error(e instanceof Error ? e.message : '迁移失败')
   }
 }
+
+// 保存：当前设置项（存储位置）为即时生效，保存即返回工作区。
+// 未来追加的表单型设置在此处统一持久化。
+function onSave() {
+  emit('save')
+}
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="设置" width="820px" top="6vh">
+  <section class="settings-page">
+    <header class="page-header">
+      <h2 class="page-title">设置</h2>
+    </header>
+
     <div class="settings-body">
       <!-- 左：分组标签 -->
       <div class="tabs">
@@ -122,16 +127,37 @@ async function onChangeStorage() {
       </div>
     </div>
 
-    <template #footer>
-      <el-button @click="visible = false">关闭</el-button>
-    </template>
-  </el-dialog>
+    <footer class="page-footer">
+      <el-button type="primary" @click="onSave">保存</el-button>
+    </footer>
+  </section>
 </template>
 
 <style scoped>
+.settings-page {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-left: 1px solid #e5e7eb;
+}
+.page-header {
+  flex-shrink: 0;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  color: #1f2937;
+}
 .settings-body {
   display: flex;
-  height: 60vh;
+  flex: 1;
+  min-height: 0;
+  padding: 16px 24px 0;
   gap: 16px;
 }
 .tabs {
@@ -162,6 +188,7 @@ async function onChangeStorage() {
   overflow-y: auto;
   min-width: 0;
   scroll-behavior: smooth;
+  padding-bottom: 16px;
 }
 .section {
   padding-top: 4px;
@@ -177,5 +204,14 @@ async function onChangeStorage() {
   color: #6b7280;
   margin: 0 0 16px;
   line-height: 1.6;
+}
+.page-footer {
+  flex-shrink: 0;
+  padding: 12px 24px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: #fafafa;
 }
 </style>

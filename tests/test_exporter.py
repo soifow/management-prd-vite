@@ -74,7 +74,7 @@ def test_export_status_tags() -> None:
     project.items.append(_make_item("", "D", "需求D", RequirementStatus.DONE, date(2026, 1, 1)))
     text = Exporter().export(project)
     assert "【to do】" in text
-    assert "【UI完成等待后端】" in text
+    assert "【等待对接】" in text
     assert "【暂缓】" in text
     assert "【完成】" in text
 

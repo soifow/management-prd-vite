@@ -24,7 +24,7 @@ class AppData(BaseModel):
 class ProjectSummary(BaseModel):
     """项目列表中展示的汇总信息。
 
-    ``latest_done_or_ui_date`` 为该项目内状态属于「完成 / UI完成等待后端」的需求中，
+    ``latest_done_or_ui_date`` 为该项目内状态属于「完成 / 等待对接」的需求中，
     最新日期（取两者最大），用于一眼看出项目当前代码状态的最新时间点。
     """
 

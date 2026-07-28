@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Document, Setting } from '@element-plus/icons-vue'
 
-// 选中事件交给父组件处理：workspace=无操作（已在工作区），settings=打开设置弹窗
+defineProps<{ activeKey: 'workspace' | 'settings' }>()
+// 选中事件交给父组件：切换视图（workspace=工作区，settings=设置页）
 const emit = defineEmits<{ (e: 'select', key: 'workspace' | 'settings'): void }>()
 
 function onSelectWorkspace() {
@@ -14,8 +15,8 @@ function onSelectSettings() {
 
 <template>
   <el-aside width="64px" class="nav-col">
-    <!-- 顶部：工作区（默认选中） -->
-    <el-menu class="nav-menu" :collapse="true" :default-active="'workspace'">
+    <!-- 顶部：工作区 -->
+    <el-menu class="nav-menu" :collapse="true" :default-active="activeKey">
       <el-menu-item index="workspace" @click="onSelectWorkspace">
         <el-icon><Document /></el-icon>
         <template #title>工作区</template>
@@ -24,8 +25,8 @@ function onSelectSettings() {
 
     <div class="spacer" />
 
-    <!-- 底部：设置（动作型菜单，点击仅打开弹窗，不进入选中态） -->
-    <el-menu class="nav-menu is-settings" :collapse="true">
+    <!-- 底部：设置 -->
+    <el-menu class="nav-menu" :collapse="true" :default-active="activeKey">
       <el-menu-item index="settings" @click="onSelectSettings">
         <el-icon><Setting /></el-icon>
         <template #title>设置</template>
@@ -62,18 +63,9 @@ function onSelectSettings() {
   background: #374151;
   color: #ffffff;
 }
-/* 折叠态下选中项高亮 */
+/* 折叠态下选中项高亮：工作区与设置共用同一份高亮逻辑 */
 .nav-menu :deep(.el-menu-item.is-active) {
   color: #ffffff;
   background: #409eff;
-}
-/* 设置项点击后不应保留蓝色激活态：弹窗关闭后回到深色背景 */
-.nav-menu.is-settings :deep(.el-menu-item.is-active) {
-  color: #cbd5e1;
-  background: transparent;
-}
-.nav-menu.is-settings :deep(.el-menu-item.is-active:hover) {
-  background: #374151;
-  color: #ffffff;
 }
 </style>

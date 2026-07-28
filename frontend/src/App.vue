@@ -12,14 +12,15 @@ import ProjectSidebar from '@/components/ProjectSidebar.vue'
 import FilterToolbar from '@/components/FilterToolbar.vue'
 import RequirementTree from '@/components/RequirementTree.vue'
 import FeatureDetail from '@/components/FeatureDetail.vue'
-import SettingsDialog from '@/components/SettingsDialog.vue'
+import SettingsPage from '@/components/SettingsPage.vue'
 
 const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
 const { selectedFeature } = storeToRefs(requirementsStore)
 
-const settingsVisible = ref(false)
+/** 当前视图：workspace=工作区，settings=设置页 */
+const currentView = ref<'workspace' | 'settings'>('workspace')
 
 onMounted(async () => {
   try {
@@ -44,25 +45,37 @@ watch(activeProjectId, async (id) => {
 })
 
 function onNavSelect(key: 'workspace' | 'settings') {
-  if (key === 'settings') settingsVisible.value = true
+  currentView.value = key
+}
+
+/** 设置页保存：切回工作区 */
+function onSettingsSave() {
+  currentView.value = 'workspace'
 }
 </script>
 
 <template>
   <el-container class="layout">
-    <AppNavMenu @select="onNavSelect" />
-    <el-aside width="260px" class="aside">
-      <ProjectSidebar />
-    </el-aside>
-    <el-main class="main">
-      <FilterToolbar v-if="!selectedFeature" class="toolbar-sticky" />
-      <div class="content" :class="{ 'content-full': selectedFeature }">
-        <FeatureDetail v-if="selectedFeature" />
-        <RequirementTree v-else />
-      </div>
-    </el-main>
+    <AppNavMenu :active-key="currentView" @select="onNavSelect" />
 
-    <SettingsDialog v-model="settingsVisible" />
+    <!-- 设置页：替换整个右侧区域 -->
+    <template v-if="currentView === 'settings'">
+      <SettingsPage @save="onSettingsSave" />
+    </template>
+
+    <!-- 工作区：项目侧边栏 + 主内容 -->
+    <template v-else>
+      <el-aside width="260px" class="aside">
+        <ProjectSidebar />
+      </el-aside>
+      <el-main class="main">
+        <FilterToolbar v-if="!selectedFeature" class="toolbar-sticky" />
+        <div class="content" :class="{ 'content-full': selectedFeature }">
+          <FeatureDetail v-if="selectedFeature" />
+          <RequirementTree v-else />
+        </div>
+      </el-main>
+    </template>
   </el-container>
 </template>
 

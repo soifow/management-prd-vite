@@ -3,7 +3,7 @@ export type RequirementStatus = 'todo' | 'ui_done_waiting_backend' | 'done' | 'd
 
 export const STATUS_LABEL: Record<RequirementStatus, string> = {
   todo: 'to do',
-  ui_done_waiting_backend: 'UI完成等待后端',
+  ui_done_waiting_backend: '等待对接',
   done: '完成',
   deferred: '暂缓',
 }
