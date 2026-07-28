@@ -7,6 +7,7 @@ import type { StorageInfo } from '@/types/api'
 import type { ParsedRequirement, PickParseResult } from '@/types/import'
 import type { Project, ProjectSummary } from '@/types/project'
 import type { RequirementItem, RequirementStatus } from '@/types/requirement'
+import type { AppSettings } from '@/types/settings'
 
 /** 后端错误信封抛出的统一异常类型。 */
 export class ApiError extends Error {
@@ -148,3 +149,10 @@ export const pickStorageDir = (): Promise<string | null> =>
 
 export const migrateStorage = (newDir: string): Promise<StorageInfo> =>
   invoke(() => bridge().migrate_storage(newDir))
+
+// ── 设置 ──────────────────────────────────────────────────
+
+export const getSettings = (): Promise<AppSettings> => invoke(() => bridge().get_settings())
+
+export const updateSettings = (patch: Partial<AppSettings>): Promise<AppSettings> =>
+  invoke(() => bridge().update_settings(patch))

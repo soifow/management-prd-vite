@@ -105,11 +105,11 @@ export type RequirementStatus = 'todo' | 'ui_done_waiting_backend' | 'done' | 'd
 class RequirementItem(BaseModel):
     id: str
     project_id: str
-    module: str = ""           # 所属模块
-    feature: str               # 功能名，关联同功能多次迭代；导入时 = content
-    content: str               # 本次迭代的需求内容（markdown 文本）
+    module: str = ""  # 所属模块
+    feature: str  # 功能名，关联同功能多次迭代；导入时 = content
+    content: str  # 本次迭代的需求内容（markdown 文本）
     status: RequirementStatus = RequirementStatus.TODO
-    date: date                 # 本次迭代时间点（单一）
+    date: date  # 本次迭代时间点（单一）
     created_at: datetime
     updated_at: datetime
 ```
@@ -133,12 +133,16 @@ interface RequirementItem {
 
 ```python
 class Project(BaseModel):
-    id: str; name: str
-    created_at: datetime; updated_at: datetime
+    id: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
     items: list[RequirementItem] = []
 
+
 class ProjectSummary(BaseModel):
-    id: str; name: str
+    id: str
+    name: str
     requirement_count: int
     latest_done_or_ui_date: date | None
     updated_at: datetime
@@ -149,10 +153,10 @@ class ProjectSummary(BaseModel):
 ```python
 class ParsedRequirement(BaseModel):
     module: str = ""
-    feature: str = ""          # 默认 = content（导入时）
+    feature: str = ""  # 默认 = content（导入时）
     content: str
     status: RequirementStatus = RequirementStatus.DONE
-    date: date                 # 单一日期
+    date: date  # 单一日期
     selected: bool = True
 ```
 

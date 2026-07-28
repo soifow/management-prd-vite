@@ -16,7 +16,14 @@ import {
   updateRequirement,
 } from '@/api'
 import type { CreateRequirementInput, UpdateRequirementInput } from '@/api'
-import type { Project, ParsedRequirement, PickParseResult, RequirementItem, RequirementStatus } from '@/types'
+import type {
+  Project,
+  ParsedRequirement,
+  PickParseResult,
+  RequirementItem,
+  RequirementStatus,
+} from '@/types'
+import type { ViewMode } from '@/types/settings'
 import { useRequirementFilter } from '@/composables/useRequirementFilter'
 
 /** 当前选中的功能（详情页入口）。 */
@@ -28,6 +35,13 @@ export interface SelectedFeature {
 export const useRequirementsStore = defineStore('requirements', () => {
   const project = ref<Project | null>(null)
   const modules = ref<string[]>([])
+
+  // 聚合视图方式（session 态；启动时由 App.vue 用 settings.defaultViewMode 初始化）
+  const viewMode = ref<ViewMode>('date')
+
+  function setViewMode(mode: ViewMode) {
+    viewMode.value = mode
+  }
 
   // 详情页状态
   const selectedFeature = ref<SelectedFeature | null>(null)
@@ -182,6 +196,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
   return {
     project,
     modules,
+    viewMode,
     selectedFeature,
     currentIterations,
     selectedIterationId,
@@ -196,6 +211,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     closeFeature,
     reset,
     selectIteration,
+    setViewMode,
     createIteration,
     updateIteration,
     setIterationStatus,

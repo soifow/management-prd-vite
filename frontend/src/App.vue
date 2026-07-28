@@ -5,19 +5,22 @@ import { ElMessage } from 'element-plus'
 
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
+import { useSettingsStore } from '@/stores/settings'
 import { whenReady } from '@/api'
 
 import AppNavMenu from '@/components/AppNavMenu.vue'
 import ProjectSidebar from '@/components/ProjectSidebar.vue'
 import FilterToolbar from '@/components/FilterToolbar.vue'
 import RequirementTree from '@/components/RequirementTree.vue'
+import DateGroupView from '@/components/DateGroupView.vue'
 import FeatureDetail from '@/components/FeatureDetail.vue'
 import SettingsPage from '@/components/SettingsPage.vue'
 
 const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
+const settingsStore = useSettingsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
-const { selectedFeature } = storeToRefs(requirementsStore)
+const { selectedFeature, viewMode } = storeToRefs(requirementsStore)
 
 /** 当前视图：workspace=工作区，settings=设置页 */
 const currentView = ref<'workspace' | 'settings'>('workspace')
@@ -25,7 +28,9 @@ const currentView = ref<'workspace' | 'settings'>('workspace')
 onMounted(async () => {
   try {
     await whenReady()
-    await projectsStore.loadSummaries()
+    // 并行加载项目列表与设置；设置就绪后初始化聚合视图
+    await Promise.all([projectsStore.loadSummaries(), settingsStore.loadSettings()])
+    requirementsStore.setViewMode(settingsStore.defaultViewMode)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '初始化失败')
   }
@@ -72,6 +77,7 @@ function onSettingsSave() {
         <FilterToolbar v-if="!selectedFeature" class="toolbar-sticky" />
         <div class="content" :class="{ 'content-full': selectedFeature }">
           <FeatureDetail v-if="selectedFeature" />
+          <DateGroupView v-else-if="viewMode === 'date'" />
           <RequirementTree v-else />
         </div>
       </el-main>

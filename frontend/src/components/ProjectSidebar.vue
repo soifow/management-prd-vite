@@ -8,13 +8,19 @@ import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
 import ProjectDialog from '@/components/ProjectDialog.vue'
 import ImportPreviewDialog from '@/components/ImportPreviewDialog.vue'
-import type { ParsedRequirement } from '@/types'
+import type { ViewMode } from '@/types'
 import { formatYymmdd } from '@/utils'
 import { useTemplateRef } from 'vue'
 
 const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
 const { summaries, activeProjectId } = storeToRefs(projectsStore)
+const { viewMode } = storeToRefs(requirementsStore)
+
+const viewModeOptions: { label: string; value: ViewMode }[] = [
+  { label: '模块', value: 'module' },
+  { label: '时间', value: 'date' },
+]
 
 const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'rename'>('create')
@@ -89,6 +95,11 @@ async function onImportAsNew() {
   <div class="sidebar">
     <div class="header">
       <span class="title">项目</span>
+      <el-segmented
+        v-model="viewMode"
+        :options="viewModeOptions"
+        size="small"
+      />
     </div>
 
     <div class="actions">
@@ -162,10 +173,12 @@ async function onImportAsNew() {
   justify-content: space-between;
   align-items: center;
   padding: 16px 16px 8px;
+  gap: 8px;
 }
 .title {
   font-weight: 600;
   font-size: 15px;
+  flex-shrink: 0;
 }
 .actions {
   display: flex;

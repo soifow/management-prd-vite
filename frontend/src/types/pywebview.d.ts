@@ -6,6 +6,7 @@ import type { ApiErrorEnvelope } from './api'
 import type { ParsedRequirement, PickParseResult } from './import'
 import type { Project, ProjectSummary } from './project'
 import type { RequirementItem, RequirementStatus } from './requirement'
+import type { AppSettings } from './settings'
 
 export interface CreateRequirementInput {
   module: string
@@ -70,6 +71,10 @@ export interface PyWebViewApi {
   get_storage_info(): Promise<StorageInfo | ApiErrorEnvelope>
   pick_storage_dir(): Promise<string | null | ApiErrorEnvelope>
   migrate_storage(new_dir: string): Promise<StorageInfo | ApiErrorEnvelope>
+
+  // ── 设置 ──
+  get_settings(): Promise<AppSettings | ApiErrorEnvelope>
+  update_settings(patch: Partial<AppSettings>): Promise<AppSettings | ApiErrorEnvelope>
 }
 
 declare global {

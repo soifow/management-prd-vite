@@ -18,8 +18,9 @@ import webview
 
 from management_prd.api import WebApi
 from management_prd.errors import ManagementPrdError
+from management_prd.services.db_service import DbService
 from management_prd.services.project_service import ProjectService
-from management_prd.services.storage_service import StorageService
+from management_prd.services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,14 @@ def run(dev: bool = False) -> int:
     )
 
     try:
-        storage = StorageService()
-        project_service = ProjectService(storage)
-        api = WebApi(project_service=project_service)
+        db = DbService()
+        db.init_db()
+        project_service = ProjectService(db)
+        settings_service = SettingsService(db.bootstrap)
+        api = WebApi(
+            project_service=project_service,
+            settings_service=settings_service,
+        )
     except ManagementPrdError as exc:
         logger.error("启动失败: %s", exc)
         print(f"启动失败: {exc}", file=sys.stderr)

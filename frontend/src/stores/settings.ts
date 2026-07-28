@@ -1,14 +1,18 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-import { getStorageInfo, migrateStorage, pickStorageDir } from '@/api'
+import { getSettings, getStorageInfo, migrateStorage, pickStorageDir, updateSettings } from '@/api'
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
 import type { StorageInfo } from '@/types/api'
+import type { ViewMode } from '@/types/settings'
 
 export const useSettingsStore = defineStore('settings', () => {
   const storageInfo = ref<StorageInfo | null>(null)
   const loading = ref(false)
+
+  // 应用设置（落盘在 storage_dir/settings.json）
+  const defaultViewMode = ref<ViewMode>('date')
 
   async function loadStorageInfo() {
     loading.value = true
@@ -17,6 +21,18 @@ export const useSettingsStore = defineStore('settings', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  /** 加载应用设置（启动时调用，初始化 defaultViewMode）。 */
+  async function loadSettings() {
+    const settings = await getSettings()
+    defaultViewMode.value = settings.default_view_mode
+  }
+
+  /** 修改默认聚合方式并落盘。 */
+  async function saveDefaultViewMode(mode: ViewMode) {
+    const settings = await updateSettings({ default_view_mode: mode })
+    defaultViewMode.value = settings.default_view_mode
   }
 
   /** 弹文件夹选择框，返回所选路径或 null（取消）。 */
@@ -46,7 +62,10 @@ export const useSettingsStore = defineStore('settings', () => {
   return {
     storageInfo,
     loading,
+    defaultViewMode,
     loadStorageInfo,
+    loadSettings,
+    saveDefaultViewMode,
     pickFolder,
     migrate,
   }

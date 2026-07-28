@@ -118,5 +118,7 @@ class BootstrapService:
         shutil.move(str(legacy), str(self._default_storage / _LEGACY_DATA_FILENAME))
         legacy_tmp = self._base / f"{_LEGACY_DATA_FILENAME}.tmp"
         if legacy_tmp.exists():
-            shutil.move(str(legacy_tmp), str(self._default_storage / f"{_LEGACY_DATA_FILENAME}.tmp"))
+            shutil.move(
+                str(legacy_tmp), str(self._default_storage / f"{_LEGACY_DATA_FILENAME}.tmp")
+            )
         logger.info("已将旧版 data.json 迁入默认 storage_dir: %s", self._default_storage)

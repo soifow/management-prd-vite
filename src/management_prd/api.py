@@ -34,9 +34,11 @@ from management_prd.models.data import (
     UpdateRequirementInput,
 )
 from management_prd.models.requirement import RequirementItem, RequirementStatus
+from management_prd.services.bootstrap_service import BootstrapService
+from management_prd.services.db_service import DbService
 from management_prd.services.importer import parse_import
 from management_prd.services.project_service import ProjectService
-from management_prd.services.storage_service import StorageService
+from management_prd.services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +51,24 @@ def _err(exc: Exception) -> dict[str, object]:
 class WebApi:
     """暴露给前端的全部方法集合（PyWebView ``js_api``）。"""
 
-    def __init__(self, project_service: ProjectService | None = None) -> None:
-        self._project_service = project_service or ProjectService(self._default_storage())
+    def __init__(
+        self,
+        project_service: ProjectService | None = None,
+        settings_service: SettingsService | None = None,
+        bootstrap: BootstrapService | None = None,
+    ) -> None:
+        if project_service is None:
+            db = self._default_db()
+            project_service = ProjectService(db)
+            if bootstrap is None:
+                bootstrap = db.bootstrap
+        self._project_service = project_service
+        self._settings_service = settings_service or SettingsService(bootstrap)
         self._window: webview.Window | None = None
 
     @staticmethod
-    def _default_storage() -> StorageService:
-        return StorageService()
+    def _default_db() -> DbService:
+        return DbService()
 
     # ---------- 窗口注入 ----------
 
@@ -183,7 +196,9 @@ class WebApi:
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
-    def apply_import_as_new_project(self, name: str, requirements: list[dict[str, object]]) -> object:
+    def apply_import_as_new_project(
+        self, name: str, requirements: list[dict[str, object]]
+    ) -> object:
         """新建项目并导入需求（项目名取自导入文件名）。"""
         try:
             from management_prd.models.data import ParsedRequirement
@@ -238,6 +253,23 @@ class WebApi:
         """
         try:
             return self._project_service.migrate_storage_dir(new_dir)
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    # ---------- 设置 ----------
+
+    def get_settings(self) -> object:
+        """返回应用设置（落盘在 storage_dir/settings.json）。"""
+        try:
+            return self._settings_service.get_settings_dict()
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def update_settings(self, patch: dict[str, object]) -> object:
+        """部分更新设置并落盘。非法值返回错误信封。"""
+        try:
+            settings = self._settings_service.update_settings(patch)
+            return settings.model_dump(mode="json")
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 

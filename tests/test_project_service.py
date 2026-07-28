@@ -1,4 +1,4 @@
-"""项目服务测试（v3：单 date + feature）。"""
+"""项目服务测试（v3：单 date + feature，SQLite 后端）。"""
 
 from __future__ import annotations
 
@@ -13,15 +13,16 @@ from management_prd.models.data import (
     UpdateRequirementInput,
 )
 from management_prd.models.requirement import RequirementStatus
+from management_prd.services.db_service import DbService
 from management_prd.services.project_service import ProjectService
-from management_prd.services.storage_service import StorageService
 
 
 @pytest.fixture()
 def service(tmp_path: Path) -> ProjectService:
-    """使用临时目录的 ProjectService。"""
-    storage = StorageService(data_path=tmp_path / "data.json")
-    return ProjectService(storage)
+    """使用临时目录的 ProjectService（基于临时 SQLite）。"""
+    db = DbService(db_path=tmp_path / "requment.db")
+    db.init_db()
+    return ProjectService(db)
 
 
 # ---------- 项目 ----------
@@ -390,8 +391,9 @@ def test_apply_import_skips_unselected(service: ProjectService) -> None:
 
 
 def test_persistence_across_instances(tmp_path: Path) -> None:
-    storage = StorageService(data_path=tmp_path / "data.json")
-    s1 = ProjectService(storage)
+    db_path = tmp_path / "requment.db"
+    DbService(db_path=db_path).init_db()
+    s1 = ProjectService(DbService(db_path=db_path))
     p = s1.create_project("项目A")
     s1.create_requirement(
         p.id,
@@ -404,7 +406,7 @@ def test_persistence_across_instances(tmp_path: Path) -> None:
         ),
     )
 
-    s2 = ProjectService(StorageService(data_path=tmp_path / "data.json"))
+    s2 = ProjectService(DbService(db_path=db_path))
     summaries = s2.list_summaries()
     assert len(summaries) == 1
     assert summaries[0].requirement_count == 1

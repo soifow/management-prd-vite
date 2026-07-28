@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder } from '@element-plus/icons-vue'
 
 import { useSettingsStore } from '@/stores/settings'
+import type { ViewMode } from '@/types/settings'
 
 const emit = defineEmits<{
   (e: 'save'): void
@@ -12,11 +13,12 @@ const emit = defineEmits<{
 }>()
 
 const settingsStore = useSettingsStore()
-const { storageInfo, loading } = storeToRefs(settingsStore)
+const { storageInfo, loading, defaultViewMode } = storeToRefs(settingsStore)
 
 // 分组定义（未来追加分组只需在此扩展）
 const groups = [
   { key: 'storage', label: '存储位置' },
+  { key: 'display', label: '显示设置' },
 ] as const
 
 const activeKey = ref<string>(groups[0].key)
@@ -41,7 +43,7 @@ function onScroll() {
   if (!container) return
   const top = container.scrollTop
   // 找到当前最靠近顶部、尚未滚出的分组
-  let current = groups[0].key
+  let current: string = groups[0].key
   for (const g of groups) {
     const el = document.getElementById(`setting-section-${g.key}`)
     if (!el) continue
@@ -69,10 +71,17 @@ async function onChangeStorage() {
   }
 }
 
-// 保存：当前设置项（存储位置）为即时生效，保存即返回工作区。
-// 未来追加的表单型设置在此处统一持久化。
-function onSave() {
-  emit('save')
+// 保存：存储位置为即时生效；显示设置在此统一落盘后返回工作区。
+async function onSave() {
+  try {
+    await settingsStore.saveDefaultViewMode(defaultViewMode.value as ViewMode)
+    // 落盘后立即应用到当前会话视图
+    const { useRequirementsStore } = await import('@/stores/requirements')
+    useRequirementsStore().setViewMode(defaultViewMode.value as ViewMode)
+    emit('save')
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '保存设置失败')
+  }
 }
 </script>
 
@@ -121,6 +130,22 @@ function onSave() {
             </el-form-item>
             <el-form-item v-else-if="storageInfo">
               <el-tag type="info" size="small">默认位置</el-tag>
+            </el-form-item>
+          </el-form>
+        </section>
+
+        <!-- 显示设置 -->
+        <section id="setting-section-display" class="section">
+          <h3 class="section-title">显示设置</h3>
+          <p class="section-desc">
+            设置需求列表的默认聚合方式。切换后下次打开应用时自动进入对应视图。
+          </p>
+          <el-form label-position="top">
+            <el-form-item label="默认聚合方式">
+              <el-radio-group v-model="defaultViewMode">
+                <el-radio value="date">按时间</el-radio>
+                <el-radio value="module">按模块</el-radio>
+              </el-radio-group>
             </el-form-item>
           </el-form>
         </section>

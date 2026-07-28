@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from management_prd.services.bootstrap_service import BootstrapService
+from management_prd.services.db_service import DbService
 from management_prd.services.project_service import ProjectService
-from management_prd.services.storage_service import StorageService
 
 
 @pytest.fixture
@@ -18,8 +18,9 @@ def bootstrap(tmp_path: Path) -> BootstrapService:
 
 @pytest.fixture
 def service(tmp_path: Path, bootstrap: BootstrapService) -> ProjectService:
-    storage = StorageService(bootstrap=bootstrap)
-    return ProjectService(storage)
+    db = DbService(bootstrap=bootstrap)
+    db.init_db()
+    return ProjectService(db)
 
 
 # ---------- BootstrapService ----------
@@ -54,7 +55,7 @@ def test_legacy_migration_skips_when_already_in_storage(tmp_path: Path) -> None:
     base = tmp_path / "app"
     storage = base / "storage"
     storage.mkdir(parents=True)
-    (storage / "data.json").write_text('{}', encoding="utf-8")
+    (storage / "data.json").write_text("{}", encoding="utf-8")
     bootstrap = BootstrapService(base_dir=base)
     bootstrap.ensure_legacy_migrated()
     # 不应报错，data.json 仍在 storage
@@ -69,7 +70,7 @@ def test_migrate_moves_all_contents_and_updates_pointer(
 ) -> None:
     # 写入数据
     service.create_project("项目A")
-    old_dir = service._storage.storage_dir
+    old_dir = service._db.storage_dir
     # 额外落盘一个文件（模拟未来扩展的数据文件），应一并迁移
     extra = old_dir / "extra.log"
     extra.write_text("log", encoding="utf-8")
@@ -82,7 +83,7 @@ def test_migrate_moves_all_contents_and_updates_pointer(
     assert info["storage_dir"] == str(expected_dir)
     assert bootstrap.is_default() is False
     # 旧目录所有内容已迁入专属子目录
-    assert (expected_dir / "data.json").exists()
+    assert (expected_dir / "requment.db").exists()
     assert (expected_dir / "extra.log").exists()
     # 用户所选父目录保留（仅旧 storage 被清理，不误伤所选目录）
     assert parent.exists()
