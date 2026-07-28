@@ -9,7 +9,7 @@ import { useRequirementsStore } from '@/stores/requirements'
 import ProjectDialog from '@/components/ProjectDialog.vue'
 import ImportPreviewDialog from '@/components/ImportPreviewDialog.vue'
 import type { ViewMode } from '@/types'
-import { formatYymmdd } from '@/utils'
+import { formatDate } from '@/utils'
 import { useTemplateRef } from 'vue'
 
 const projectsStore = useProjectsStore()
@@ -17,10 +17,10 @@ const requirementsStore = useRequirementsStore()
 const { summaries, activeProjectId } = storeToRefs(projectsStore)
 const { viewMode } = storeToRefs(requirementsStore)
 
-const viewModeOptions: { label: string; value: ViewMode }[] = [
-  { label: '模块', value: 'module' },
-  { label: '时间', value: 'date' },
-]
+// el-switch 切换聚合视图：active=按时间，inactive=按模块
+function onViewModeChange(val: string | number | boolean) {
+  viewMode.value = val as ViewMode
+}
 
 const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'rename'>('create')
@@ -95,35 +95,35 @@ async function onImportAsNew() {
   <div class="sidebar">
     <div class="header">
       <span class="title">项目</span>
-      <el-segmented
-        v-model="viewMode"
-        :options="viewModeOptions"
+      <el-switch
+        :model-value="viewMode"
         size="small"
+        active-value="date"
+        inactive-value="module"
+        active-text="时间"
+        inactive-text="模块"
+        @change="onViewModeChange"
       />
     </div>
 
     <div class="actions">
-      <el-button :icon="Plus" plain size="small" class="action-btn" @click="openCreate">
-        新建项目
+      <el-button plain size="small" class="action-btn" @click="openCreate">
+        <el-icon class="action-icon"><Plus /></el-icon>
+        <span>新建项目</span>
+      </el-button>
+      <el-button plain size="small" class="action-btn" @click="onImportAsNew">
+        <el-icon class="action-icon"><FolderAdd /></el-icon>
+        <span>导入新建项目</span>
       </el-button>
       <el-button
-        :icon="FolderAdd"
-        plain
-        size="small"
-        class="action-btn"
-        @click="onImportAsNew"
-      >
-        导入新建项目
-      </el-button>
-      <el-button
-        :icon="Upload"
         plain
         size="small"
         class="action-btn"
         :disabled="!activeProjectId"
         @click="onImportCurrent"
       >
-        导入当前项目
+        <el-icon class="action-icon"><Upload /></el-icon>
+        <span>导入当前项目</span>
       </el-button>
     </div>
 
@@ -145,7 +145,7 @@ async function onImportAsNew() {
         <div class="item-meta">
           <span>{{ p.requirement_count }} 条需求</span>
           <span v-if="p.latest_done_or_ui_date" class="date-tag">
-            最新 {{ formatYymmdd(p.latest_done_or_ui_date) }}
+            最新 {{ formatDate(p.latest_done_or_ui_date) }}
           </span>
         </div>
       </div>
@@ -190,6 +190,18 @@ async function onImportAsNew() {
   width: 100%;
   /* 三个按钮左对齐，图标与文字起点统一（覆盖 el-button 默认居中） */
   justify-content: flex-start;
+  gap: 6px;
+}
+/* 覆盖 element-plus 默认 .el-button+.el-button{margin-left:12px}：
+   该规则本为横向按钮组设计间距，纵向排列时会让第 2、3 个按钮整体右移 12px */
+.actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+.action-icon {
+  /* 固定图标尺寸，消除不同图标内部留白差异导致的视觉错位 */
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 .list {
   flex: 1;

@@ -9,4 +9,6 @@ export type ViewMode = 'module' | 'date'
 export interface AppSettings {
   /** 启动默认聚合方式：module=按模块 / date=按时间 */
   default_view_mode: ViewMode
+  /** 设置页分组 tab 的显示顺序（分组 key 数组） */
+  settings_order: string[]
 }

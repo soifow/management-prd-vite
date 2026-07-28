@@ -5,7 +5,7 @@ import { storeToRefs } from 'pinia'
 import { useRequirementsStore } from '@/stores/requirements'
 import { buildFeatureTree, groupByModule } from '@/composables/useRequirementTree'
 import { STATUS_LABEL, STATUS_TAG_TYPE } from '@/types/requirement'
-import { formatYymmdd } from '@/utils'
+import { formatDate } from '@/utils'
 
 const store = useRequirementsStore()
 const { filteredItems, filters } = storeToRefs(store)
@@ -61,7 +61,7 @@ function onOpenFeature(module: string, feature: string) {
               {{ STATUS_LABEL[f.latestStatus] }}
             </el-tag>
             <span class="meta-info">
-              {{ f.count }} 次迭代 · 最新 {{ formatYymmdd(f.latestDate) }}
+              {{ f.count }} 次迭代 · 最新 {{ formatDate(f.latestDate) }}
             </span>
             <span class="arrow">›</span>
           </div>

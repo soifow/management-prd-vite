@@ -1,11 +1,8 @@
-/** 把 date (yyyy-MM-dd 或 yyyy/MM/dd) 转为 YYMMDD 显示。 */
-export function formatYymmdd(date: string): string {
+/** 把 date (yyyy-MM-dd 或 yyyy/MM/dd) 统一格式化为 yyyy-MM-dd 显示。 */
+export function formatDate(date: string): string {
   if (!date) return ''
-  // 支持 yyyy-MM-dd 或 yyyy/MM/dd
   const normalized = date.replace(/\//g, '-')
-  const parts = normalized.split('-')
-  if (parts.length !== 3) return date
-  return parts[0].slice(2) + parts[1] + parts[2]
+  return normalized.split('-').length === 3 ? normalized : date
 }
 
 /** 把 date 转为 yyyy-MM-dd（如果没有则返回空）。 */

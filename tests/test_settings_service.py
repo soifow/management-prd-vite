@@ -19,6 +19,7 @@ def test_load_returns_default_when_missing(bootstrap: BootstrapService) -> None:
     svc = SettingsService(bootstrap=bootstrap)
     settings = svc.load()
     assert settings.default_view_mode == "date"
+    assert settings.settings_order == ["storage", "display"]
 
 
 def test_save_and_load_roundtrip(bootstrap: BootstrapService) -> None:
@@ -48,7 +49,24 @@ def test_update_settings_invalid_raises(bootstrap: BootstrapService) -> None:
 def test_get_settings_dict(bootstrap: BootstrapService) -> None:
     svc = SettingsService(bootstrap=bootstrap)
     d = svc.get_settings_dict()
-    assert d == {"default_view_mode": "date"}
+    assert d == {"default_view_mode": "date", "settings_order": ["storage", "display"]}
+
+
+def test_settings_order_update(bootstrap: BootstrapService) -> None:
+    svc = SettingsService(bootstrap=bootstrap)
+    updated = svc.update_settings({"settings_order": ["display", "storage"]})
+    assert updated.settings_order == ["display", "storage"]
+    # 落盘后再次加载一致
+    assert SettingsService(bootstrap=bootstrap).load().settings_order == ["display", "storage"]
+
+
+def test_settings_order_preserved_on_partial_update(bootstrap: BootstrapService) -> None:
+    svc = SettingsService(bootstrap=bootstrap)
+    svc.update_settings({"settings_order": ["display", "storage"]})
+    # 仅更新 default_view_mode，settings_order 应保留
+    updated = svc.update_settings({"default_view_mode": "module"})
+    assert updated.default_view_mode == "module"
+    assert updated.settings_order == ["display", "storage"]
 
 
 def test_load_corrupted_returns_default(bootstrap: BootstrapService, tmp_path: Path) -> None:

@@ -6,7 +6,7 @@ import { useRequirementsStore } from '@/stores/requirements'
 import { groupByDate } from '@/composables/useRequirementByDate'
 import { STATUS_LABEL } from '@/types/requirement'
 import type { RequirementItem, RequirementStatus } from '@/types'
-import { formatYymmdd } from '@/utils'
+import { formatDate } from '@/utils'
 
 const store = useRequirementsStore()
 const { filteredItems } = storeToRefs(store)
@@ -44,7 +44,7 @@ async function onStatusChange(item: RequirementItem, status: RequirementStatus) 
       >
         <template #title>
           <span class="date-title">
-            {{ formatYymmdd(g.date) }}
+            {{ formatDate(g.date) }}
             <el-tag type="info" size="small" effect="plain" class="count-tag">
               {{ g.items.length }} 条
             </el-tag>

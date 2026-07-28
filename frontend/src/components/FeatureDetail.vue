@@ -8,7 +8,7 @@ import { MdEditor } from 'md-editor-v3'
 import { useRequirementsStore } from '@/stores/requirements'
 import type { RequirementStatus } from '@/types'
 import { STATUS_LABEL, STATUS_TAG_TYPE } from '@/types/requirement'
-import { formatYymmdd } from '@/utils'
+import { formatDate } from '@/utils'
 import RequirementEditDialog from '@/components/RequirementEditDialog.vue'
 
 const store = useRequirementsStore()
@@ -88,7 +88,7 @@ function onBack() {
       <div class="editor-pane">
         <template v-if="selectedIteration">
           <div class="iter-head">
-            <span class="iter-date">📅 {{ formatYymmdd(selectedIteration.date) }}</span>
+            <span class="iter-date">📅 {{ formatDate(selectedIteration.date) }}</span>
             <el-select v-model="bufferStatus" size="small" style="width: 160px">
               <el-option v-for="s in statusOptions" :key="s" :label="STATUS_LABEL[s]" :value="s" />
             </el-select>
@@ -107,7 +107,7 @@ function onBack() {
             <el-timeline-item
               v-for="it in [...currentIterations].reverse()"
               :key="it.id"
-              :timestamp="formatYymmdd(it.date)"
+              :timestamp="formatDate(it.date)"
               :type="STATUS_TAG_TYPE[it.status] as never"
               placement="top"
             >

@@ -13,6 +13,8 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // 应用设置（落盘在 storage_dir/settings.json）
   const defaultViewMode = ref<ViewMode>('date')
+  // 设置页分组 tab 的显示顺序（落盘 settings.json）
+  const settingsOrder = ref<string[]>(['storage', 'display'])
 
   async function loadStorageInfo() {
     loading.value = true
@@ -23,16 +25,26 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  /** 加载应用设置（启动时调用，初始化 defaultViewMode）。 */
+  /** 加载应用设置（启动时调用，初始化 defaultViewMode 与 settingsOrder）。 */
   async function loadSettings() {
     const settings = await getSettings()
     defaultViewMode.value = settings.default_view_mode
+    settingsOrder.value =
+      settings.settings_order && settings.settings_order.length > 0
+        ? settings.settings_order
+        : ['storage', 'display']
   }
 
   /** 修改默认聚合方式并落盘。 */
   async function saveDefaultViewMode(mode: ViewMode) {
     const settings = await updateSettings({ default_view_mode: mode })
     defaultViewMode.value = settings.default_view_mode
+  }
+
+  /** 修改设置分组顺序并落盘。 */
+  async function saveSettingsOrder(order: string[]) {
+    const settings = await updateSettings({ settings_order: order })
+    settingsOrder.value = settings.settings_order
   }
 
   /** 弹文件夹选择框，返回所选路径或 null（取消）。 */
@@ -63,9 +75,11 @@ export const useSettingsStore = defineStore('settings', () => {
     storageInfo,
     loading,
     defaultViewMode,
+    settingsOrder,
     loadStorageInfo,
     loadSettings,
     saveDefaultViewMode,
+    saveSettingsOrder,
     pickFolder,
     migrate,
   }
