@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { Download, Plus } from '@element-plus/icons-vue'
@@ -20,6 +21,24 @@ const statusOptions: { value: RequirementStatus; label: string }[] = [
   { value: 'done', label: STATUS_LABEL.done },
   { value: 'deferred', label: STATUS_LABEL.deferred },
 ]
+
+// 日期范围：桥接 filters.dateFrom / dateTo ↔ daterange 选择器
+const dateRange = computed<[string, string] | null>({
+  get() {
+    return filters.value.dateFrom && filters.value.dateTo
+      ? [filters.value.dateFrom, filters.value.dateTo]
+      : null
+  },
+  set(val) {
+    if (val) {
+      filters.value.dateFrom = val[0]
+      filters.value.dateTo = val[1]
+    } else {
+      filters.value.dateFrom = ''
+      filters.value.dateTo = ''
+    }
+  },
+})
 
 function openCreate() {
   if (!project.value) {
@@ -46,19 +65,13 @@ async function onExport() {
 <template>
   <div class="toolbar">
     <el-date-picker
-      v-model="filters.dateFrom"
-      type="date"
-      placeholder="开始日期"
+      v-model="dateRange"
+      type="daterange"
+      range-separator="~"
+      start-placeholder="开始日期"
+      end-placeholder="结束日期"
       value-format="YYYY-MM-DD"
-      style="width: 140px"
-    />
-    <span class="sep">~</span>
-    <el-date-picker
-      v-model="filters.dateTo"
-      type="date"
-      placeholder="结束日期"
-      value-format="YYYY-MM-DD"
-      style="width: 140px"
+      style="width: 160px; --el-date-editor-daterange-width: 160px"
     />
     <el-select
       v-model="filters.statuses"
@@ -66,7 +79,7 @@ async function onExport() {
       collapse-tags
       collapse-tags-tooltip
       placeholder="状态筛选"
-      style="width: 200px"
+      style="width: 150px"
     >
       <el-option
         v-for="opt in statusOptions"
@@ -86,7 +99,7 @@ async function onExport() {
 
     <el-button :icon="Download" @click="onExport" :disabled="!project">导出</el-button>
     <el-button :icon="Plus" type="primary" @click="openCreate" :disabled="!project">
-      新建需求
+      需求
     </el-button>
 
     <RequirementEditDialog v-model="editVisible" mode="create" />
@@ -99,9 +112,6 @@ async function onExport() {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-}
-.sep {
-  color: #9ca3af;
 }
 .spacer {
   flex: 1;

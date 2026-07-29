@@ -70,7 +70,7 @@ function onSettingsSave() {
 
     <!-- 工作区：项目侧边栏 + 主内容 -->
     <template v-else>
-      <el-aside width="260px" class="aside">
+      <el-aside width="210px" class="aside">
         <ProjectSidebar />
       </el-aside>
       <el-main class="main">
