@@ -7,6 +7,7 @@ import type { ParsedRequirement, PickParseResult } from './import'
 import type { Project, ProjectSummary } from './project'
 import type { RequirementItem, RequirementStatus } from './requirement'
 import type { AppSettings } from './settings'
+import type { TodoReminder } from './todo'
 
 export interface CreateRequirementInput {
   module: string
@@ -14,6 +15,7 @@ export interface CreateRequirementInput {
   content: string
   status: RequirementStatus
   date: string
+  completion_deadline: string | null
 }
 
 export interface UpdateRequirementInput {
@@ -22,6 +24,8 @@ export interface UpdateRequirementInput {
   content?: string
   status?: RequirementStatus
   date?: string
+  completion_deadline?: string
+  clear_completion_deadline?: boolean
 }
 
 /** 后端 WebApi 暴露给前端的原始方法集合（方法名与后端 snake_case 一致）。 */
@@ -54,6 +58,7 @@ export interface PyWebViewApi {
     status: RequirementStatus,
   ): Promise<RequirementItem | ApiErrorEnvelope>
   delete_requirement(item_id: string): Promise<boolean | ApiErrorEnvelope>
+  get_todo_reminders(): Promise<TodoReminder[] | ApiErrorEnvelope>
 
   // ── 导入 / 导出 ──
   pick_and_parse_import(): Promise<PickParseResult | null | ApiErrorEnvelope>

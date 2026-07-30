@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
@@ -119,3 +120,91 @@ def test_transaction_rollback_on_error(tmp_path: Path) -> None:
     with db.transaction() as conn:
         cnt = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
         assert cnt == 0
+
+
+# ---------- schema v2 迁移（completion_deadline） ----------
+
+
+def test_init_db_has_completion_deadline_column(tmp_path: Path) -> None:
+    """全新库直接建出最新结构（含 completion_deadline 列）。"""
+    db = DbService(db_path=tmp_path / "requment.db")
+    db.init_db()
+    with db.transaction() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(requirements)")}
+    assert "completion_deadline" in cols
+    with db.transaction() as conn:
+        row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
+        assert int(row["value"]) == CURRENT_DB_SCHEMA_VERSION
+
+
+def _build_v1_db(db_path: Path) -> None:
+    """手工构造一个 schema_version=1、无 completion_deadline 列的旧库。"""
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("INSERT INTO _meta(key, value) VALUES ('schema_version', '1')")
+    conn.execute("INSERT INTO _meta(key, value) VALUES ('migrated_json', '1')")
+    conn.execute(
+        """CREATE TABLE projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    # v1 结构：无 completion_deadline
+    conn.execute(
+        """CREATE TABLE requirements (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            module TEXT NOT NULL DEFAULT '',
+            feature TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL,
+            status TEXT NOT NULL,
+            date TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )"""
+    )
+    # 插入一条旧数据
+    conn.execute(
+        "INSERT INTO projects(id, name, created_at, updated_at) VALUES ('p1', '旧项目', 't', 't')"
+    )
+    conn.execute(
+        "INSERT INTO requirements(id, project_id, module, feature, content, status, date,"
+        " created_at, updated_at) VALUES ('r1', 'p1', 'm1', 'f1', 'c1', 'todo', '2026-01-01', 't', 't')"
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_v1_db_migrated_to_v2_adds_column_and_keeps_data(tmp_path: Path) -> None:
+    """旧库（v1）启动：补 completion_deadline 列、版本升 2、历史数据完好。"""
+    db_path = tmp_path / "requment.db"
+    _build_v1_db(db_path)
+
+    DbService(db_path=db_path).init_db()
+
+    with DbService(db_path=db_path).transaction() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(requirements)")}
+        assert "completion_deadline" in cols
+        row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
+        assert int(row["value"]) == 2
+        # 历史数据仍在，且 deadline 为 NULL
+        req = conn.execute("SELECT content, completion_deadline FROM requirements").fetchone()
+        assert req["content"] == "c1"
+        assert req["completion_deadline"] is None
+
+
+def test_v2_migration_is_idempotent(tmp_path: Path) -> None:
+    """已是 v2 的库再次 init 不重复 ALTER。"""
+    db_path = tmp_path / "requment.db"
+    DbService(db_path=db_path).init_db()
+    # 第二次 init 不应报错，结构不变
+    DbService(db_path=db_path).init_db()
+    with DbService(db_path=db_path).transaction() as conn:
+        # 仍只有一列 completion_deadline
+        cnt = conn.execute(
+            "SELECT COUNT(*) FROM pragma_table_info('requirements') WHERE name='completion_deadline'"
+        ).fetchone()[0]
+        assert cnt == 1

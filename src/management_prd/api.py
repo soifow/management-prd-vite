@@ -80,7 +80,10 @@ class WebApi:
 
     def list_projects(self) -> object:
         try:
-            summaries: list[ProjectSummary] = self._project_service.list_summaries()
+            settings = self._settings_service.load()
+            summaries: list[ProjectSummary] = self._project_service.list_summaries(
+                date_mode=settings.project_list_date_mode,
+            )
             return [s.model_dump(mode="json") for s in summaries]
         except Exception as exc:
             return _err(exc)
@@ -101,7 +104,10 @@ class WebApi:
 
     def rename_project(self, project_id: str, name: str) -> object:
         try:
-            summary = self._project_service.rename_project(project_id, name)
+            settings = self._settings_service.load()
+            summary = self._project_service.rename_project(
+                project_id, name, date_mode=settings.project_list_date_mode
+            )
             return summary.model_dump(mode="json")
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
@@ -160,6 +166,23 @@ class WebApi:
     def delete_requirement(self, item_id: str) -> object:
         try:
             return self._project_service.delete_requirement(item_id)
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    # ---------- 待办提醒 ----------
+
+    def get_todo_reminders(self) -> object:
+        """跨项目返回待办提醒列表（按剩余天数排序、已逾期置顶、暂缓末尾）。
+
+        阈值与「无时限常驻」开关取自设置，后端单点过滤/排序；前端按返回的
+        ``bucket``/``remaining_days`` 分组渲染。
+        """
+        try:
+            settings = self._settings_service.load()
+            return self._project_service.list_todo_reminders(
+                threshold_days=settings.reminder_threshold_days,
+                show_no_deadline=settings.show_no_deadline_in_todo,
+            )
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
@@ -293,8 +316,17 @@ class WebApi:
         if not isinstance(date_raw, str) or not date_raw:
             raise ValueError("date 必填")
         d_val = date.fromisoformat(date_raw)
+        deadline_raw = d.get("completion_deadline")
+        completion_deadline: date | None = None
+        if isinstance(deadline_raw, str) and deadline_raw:
+            completion_deadline = date.fromisoformat(deadline_raw)
         return CreateRequirementInput(
-            module=module, feature=feature, content=content, status=status, date=d_val
+            module=module,
+            feature=feature,
+            content=content,
+            status=status,
+            date=d_val,
+            completion_deadline=completion_deadline,
         )
 
     @staticmethod
@@ -315,12 +347,19 @@ class WebApi:
             if not isinstance(date_raw, str) or not date_raw:
                 raise ValueError("date 必须为非空字符串")
             d_val = date.fromisoformat(date_raw)
+        deadline_raw = d.get("completion_deadline")
+        cd: date | None = None
+        if isinstance(deadline_raw, str) and deadline_raw:
+            cd = date.fromisoformat(deadline_raw)
+        clear_deadline = bool(d.get("clear_completion_deadline", False))
         return UpdateRequirementInput(
             module=module if isinstance(module, str) else None,
             feature=feature if isinstance(feature, str) else None,
             content=content if isinstance(content, str) else None,
             status=rs,
             date=d_val,
+            completion_deadline=cd,
+            clear_completion_deadline=clear_deadline,
         )
 
     def _open_text_file(self) -> str | None:

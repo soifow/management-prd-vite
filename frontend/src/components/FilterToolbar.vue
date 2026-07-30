@@ -20,6 +20,7 @@ const statusOptions: { value: RequirementStatus; label: string }[] = [
   { value: 'ui_done_waiting_backend', label: STATUS_LABEL.ui_done_waiting_backend },
   { value: 'done', label: STATUS_LABEL.done },
   { value: 'deferred', label: STATUS_LABEL.deferred },
+  { value: 'bug', label: STATUS_LABEL.bug },
 ]
 
 // 日期范围：桥接 filters.dateFrom / dateTo ↔ daterange 选择器

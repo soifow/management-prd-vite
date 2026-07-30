@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder, Sort } from '@element-plus/icons-vue'
 
 import { useSettingsStore } from '@/stores/settings'
-import type { ViewMode } from '@/types/settings'
+import type { ProjectListDateMode, ViewMode } from '@/types/settings'
 
 const emit = defineEmits<{
   (e: 'save'): void
@@ -19,13 +19,45 @@ const { storageInfo, loading, defaultViewMode, settingsOrder } = storeToRefs(set
 const GROUPS = [
   { key: 'storage', label: '存储位置' },
   { key: 'display', label: '显示设置' },
+  { key: 'reminder', label: '提醒设置' },
 ] as const
+
+// 项目列表「最新」日期口径下拉选项：value/label/desc，desc 随选中项联动显示
+const DATE_MODE_OPTIONS: { value: ProjectListDateMode; label: string; desc: string }[] = [
+  {
+    value: 'latest_any',
+    label: '最新需求日期',
+    desc: '取项目内所有需求日期的最新值，不限状态。新增任意需求（含待办/进行中）都会刷新该日期。',
+  },
+  {
+    value: 'latest_done',
+    label: '最新已完成日期',
+    desc: '只统计「已完成/等待对接」状态的需求日期，反映项目最近一次完成或等待对接的时间点。',
+  },
+  {
+    value: 'latest_activity',
+    label: '最近操作时间',
+    desc: '取项目最近一次新增/编辑/删除需求（或重命名）的时间。任何改动都会把该项目顶到最新。',
+  },
+]
 
 // 拖拽编辑态：editingOrder=true 时用 draftOrder 渲染并可拖拽；false 时用已落盘 settingsOrder
 const editingOrder = ref(false)
 const draftOrder = ref<string[]>([...settingsOrder.value])
 const dragKey = ref<string | null>(null)
 const dragOverKey = ref<string | null>(null)
+
+// 提醒设置草稿（保存时一并落盘）
+const draftThreshold = ref(settingsStore.reminderThresholdDays)
+const draftShowNoDeadline = ref(settingsStore.showNoDeadlineInTodo)
+
+// 项目列表日期口径草稿（保存时一并落盘）
+const draftProjectListDateMode = ref<ProjectListDateMode>(settingsStore.projectListDateMode)
+
+// 当前选中口径的说明文字（随下拉选项联动）
+const dateModeDesc = computed(
+  () => DATE_MODE_OPTIONS.find((o) => o.value === draftProjectListDateMode.value)?.desc ?? '',
+)
 
 // 实际用于渲染的顺序：编辑态用草稿，非编辑态用已落盘值
 const activeOrder = computed(() => (editingOrder.value ? draftOrder.value : settingsOrder.value))
@@ -150,10 +182,13 @@ async function onChangeStorage() {
   }
 }
 
-// 保存：仅落盘「默认聚合方式」，不回写主界面当前视图（二者解耦：默认值只在冷启动生效）
+// 保存：落盘「默认聚合方式」+「项目列表日期口径」+「提醒设置」，
+// 不回写主界面当前视图（二者解耦：默认值只在冷启动生效）
 async function onSave() {
   try {
     await settingsStore.saveDefaultViewMode(defaultViewMode.value as ViewMode)
+    await settingsStore.saveProjectListDateMode(draftProjectListDateMode.value)
+    await settingsStore.saveReminderSettings(draftThreshold.value, draftShowNoDeadline.value)
     emit('save')
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '保存设置失败')
@@ -240,6 +275,45 @@ async function onSave() {
                   <el-radio value="date">按时间</el-radio>
                   <el-radio value="module">按模块</el-radio>
                 </el-radio-group>
+              </el-form-item>
+              <el-form-item label="项目列表日期">
+                <el-select
+                  v-model="draftProjectListDateMode"
+                  style="width: 240px"
+                  placeholder="选择日期口径"
+                >
+                  <el-option
+                    v-for="opt in DATE_MODE_OPTIONS"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+                <p class="field-hint date-mode-desc">{{ dateModeDesc }}</p>
+              </el-form-item>
+            </el-form>
+          </template>
+
+          <!-- 提醒设置 -->
+          <template v-else-if="g.key === 'reminder'">
+            <h3 class="section-title">提醒设置</h3>
+            <p class="section-desc">
+              启动时待办提醒抽屉中只显示「剩余天数 ≤ 阈值」且未完成的需求；「已逾期」始终置顶，状态为「暂缓」的项目不受阈值影响并始终显示在「远期规划」组。
+            </p>
+            <el-form label-position="top">
+              <el-form-item label="提醒阈值（天）">
+                <el-input-number
+                  v-model="draftThreshold"
+                  :min="0"
+                  :max="365"
+                  :step="1"
+                  style="width: 160px"
+                />
+                <span class="field-hint">仅剩余天数 ≤ 该值（且未完成）进入待办；0 表示只显示已逾期</span>
+              </el-form-item>
+              <el-form-item label="无时限需求">
+                <el-switch v-model="draftShowNoDeadline" />
+                <span class="field-hint">开启时，未设置完成时限的未完成需求常驻待办列表</span>
               </el-form-item>
             </el-form>
           </template>
@@ -369,6 +443,18 @@ async function onSave() {
   color: #6b7280;
   margin: 0 0 16px;
   line-height: 1.6;
+}
+.field-hint {
+  margin-left: 12px;
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1.6;
+}
+/* 日期口径说明：独立一行，紧贴下拉框下方 */
+.date-mode-desc {
+  margin-left: 0;
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 .page-footer {
   flex-shrink: 0;

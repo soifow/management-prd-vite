@@ -14,6 +14,7 @@ import shutil
 import threading
 from datetime import date, datetime
 from sqlite3 import Connection, Row
+from typing import ClassVar
 from uuid import uuid4
 
 from management_prd.errors import NotFoundError
@@ -25,9 +26,30 @@ from management_prd.models.data import (
 )
 from management_prd.models.project import Project
 from management_prd.models.requirement import RequirementItem, RequirementStatus
+from management_prd.models.settings import ProjectListDateMode
 from management_prd.services.db_service import DbService
 
 logger = logging.getLogger(__name__)
+
+# 项目列表「最新」日期的取值口径：每种模式对应一段 SQL 片段（统一别名为 latest）。
+# - latest_any / latest_done：对该项目 requirements 的 date 取 MAX（后者限定完成态）。
+# - latest_activity：取 projects.updated_at 的日期部分。
+_DATE_MODE_SELECT: dict[str, str] = {
+    "latest_any": "(SELECT MAX(r.date) FROM requirements r WHERE r.project_id = p.id)",
+    "latest_done": (
+        "(SELECT MAX(r.date) FROM requirements r WHERE r.project_id = p.id"
+        " AND r.status IN ('done', 'ui_done_waiting_backend'))"
+    ),
+    "latest_activity": "DATE(p.updated_at)",
+}
+
+# 排序：日期型模式按 latest DESC（SQLite DESC 天然把 NULL 排末尾，空项目沉底）；
+# 活动型按 updated_at DESC（恒非空）。均以 created_at 升序兜底稳定排序。
+_DATE_MODE_ORDER: dict[str, str] = {
+    "latest_any": "latest DESC, p.created_at ASC",
+    "latest_done": "latest DESC, p.created_at ASC",
+    "latest_activity": "p.updated_at DESC, p.created_at ASC",
+}
 
 
 def _new_id() -> str:
@@ -41,6 +63,7 @@ def _now() -> datetime:
 
 def _row_to_requirement(row: Row) -> RequirementItem:
     """sqlite3.Row -> RequirementItem。"""
+    deadline_raw = row["completion_deadline"]
     return RequirementItem(
         id=row["id"],
         project_id=row["project_id"],
@@ -49,6 +72,7 @@ def _row_to_requirement(row: Row) -> RequirementItem:
         content=row["content"],
         status=RequirementStatus(row["status"]),
         date=date.fromisoformat(row["date"]),
+        completion_deadline=date.fromisoformat(deadline_raw) if deadline_raw else None,
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -64,18 +88,24 @@ class ProjectService:
 
     # ---------- 项目 ----------
 
-    def list_summaries(self) -> list[ProjectSummary]:
-        """返回全部项目汇总。"""
+    def list_summaries(
+        self, date_mode: ProjectListDateMode = "latest_any"
+    ) -> list[ProjectSummary]:
+        """返回全部项目汇总，按所选日期口径倒序排列（越近越靠前，空日期项目沉底）。
+
+        ``date_mode`` 决定 ``list_date`` 的取值与排序方式，见
+        :data:`_DATE_MODE_SELECT` / :data:`_DATE_MODE_ORDER`。
+        """
+        select = _DATE_MODE_SELECT.get(date_mode, _DATE_MODE_SELECT["latest_any"])
+        order = _DATE_MODE_ORDER.get(date_mode, _DATE_MODE_ORDER["latest_any"])
         with self._db.transaction() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT p.id, p.name, p.created_at, p.updated_at,
                        (SELECT COUNT(*) FROM requirements r WHERE r.project_id = p.id) AS cnt,
-                       (SELECT MAX(r.date) FROM requirements r
-                          WHERE r.project_id = p.id
-                            AND r.status IN ('done', 'ui_done_waiting_backend')) AS latest
+                       {select} AS latest
                 FROM projects p
-                ORDER BY p.created_at
+                ORDER BY {order}
                 """
             ).fetchall()
             return [self._summary_from_row(r) for r in rows]
@@ -87,7 +117,7 @@ class ProjectService:
             id=row["id"],
             name=row["name"],
             requirement_count=row["cnt"],
-            latest_done_or_ui_date=latest,
+            list_date=latest,
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
@@ -125,16 +155,22 @@ class ProjectService:
             id=project.id,
             name=project.name,
             requirement_count=0,
-            latest_done_or_ui_date=None,
+            list_date=None,
             updated_at=now,
         )
 
-    def rename_project(self, project_id: str, name: str) -> ProjectSummary:
-        """重命名项目。"""
+    def rename_project(
+        self,
+        project_id: str,
+        name: str,
+        date_mode: ProjectListDateMode = "latest_any",
+    ) -> ProjectSummary:
+        """重命名项目。``date_mode`` 用于回填返回汇总的 ``list_date``（与列表口径一致）。"""
         name = name.strip()
         if not name:
             raise ValueError("项目名不能为空")
         now = _now()
+        select = _DATE_MODE_SELECT.get(date_mode, _DATE_MODE_SELECT["latest_any"])
         with self._db.transaction() as conn:
             cur = conn.execute(
                 "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
@@ -144,12 +180,10 @@ class ProjectService:
                 raise NotFoundError(f"项目不存在: {project_id}")
             return self._summary_from_row(
                 conn.execute(
-                    """
+                    f"""
                     SELECT p.id, p.name, p.created_at, p.updated_at,
                            (SELECT COUNT(*) FROM requirements r WHERE r.project_id = p.id) AS cnt,
-                           (SELECT MAX(r.date) FROM requirements r
-                              WHERE r.project_id = p.id
-                                AND r.status IN ('done', 'ui_done_waiting_backend')) AS latest
+                           {select} AS latest
                     FROM projects p WHERE p.id = ?
                     """,
                     (project_id,),
@@ -202,6 +236,88 @@ class ProjectService:
             ).fetchall()
             return [_row_to_requirement(r) for r in rows]
 
+    # ---------- 待办提醒 ----------
+
+    # 分组排序权重：已逾期置顶，剩余天数升序，无时限次之，暂缓（远期规划）末尾。
+    _TODO_BUCKET_RANK: ClassVar[dict[str, int]] = {
+        "overdue": 0,
+        "remaining": 1,
+        "no_deadline": 2,
+        "deferred": 3,
+    }
+
+    def list_todo_reminders(
+        self,
+        threshold_days: int,
+        show_no_deadline: bool,
+    ) -> list[dict[str, object]]:
+        """跨全部项目返回待办提醒列表（按剩余天数排序、已逾期置顶、暂缓末尾）。
+
+        纳入规则（仅排除 ``done``）：
+        - ``deferred``：始终纳入，``bucket="deferred"``（不受阈值影响，置末尾「远期规划」）。
+        - 非 ``deferred`` 且无时限：仅当 ``show_no_deadline`` 纳入，``bucket="no_deadline"``。
+        - 非 ``deferred`` 且有时限：``remaining=(deadline-today).days``；``<= threshold_days`` 才纳入。
+          ``remaining < 0`` -> ``bucket="overdue"``（已逾期），否则 ``bucket="remaining"``。
+
+        返回扁平有序 dict 列表，前端按 ``bucket``/``remaining_days`` 分组渲染。
+        """
+        today = date.today()
+        with self._db.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.id, r.project_id, p.name AS project_name, r.module, r.feature,
+                       r.content, r.status, r.date, r.completion_deadline
+                FROM requirements r
+                JOIN projects p ON p.id = r.project_id
+                WHERE r.status <> 'done'
+                """,
+            ).fetchall()
+
+        reminders: list[dict[str, object]] = []
+        for r in rows:
+            status = RequirementStatus(r["status"])
+            deadline_raw = r["completion_deadline"]
+            if status == RequirementStatus.DEFERRED:
+                bucket = "deferred"
+                remaining: int | None = None
+            elif not deadline_raw:
+                if not show_no_deadline:
+                    continue
+                bucket = "no_deadline"
+                remaining = None
+            else:
+                deadline = date.fromisoformat(deadline_raw)
+                remaining = (deadline - today).days
+                if remaining > threshold_days:
+                    continue
+                bucket = "overdue" if remaining < 0 else "remaining"
+
+            reminders.append(
+                {
+                    "item_id": r["id"],
+                    "project_id": r["project_id"],
+                    "project_name": r["project_name"],
+                    "module": r["module"],
+                    "feature": r["feature"],
+                    "content": r["content"],
+                    "status": status.value,
+                    "date": r["date"],
+                    "completion_deadline": deadline_raw,
+                    "remaining_days": remaining,
+                    "bucket": bucket,
+                }
+            )
+
+        reminders.sort(
+            key=lambda x: (
+                self._TODO_BUCKET_RANK[x["bucket"]],  # type: ignore[index]
+                x["remaining_days"] if x["remaining_days"] is not None else 10**9,
+                str(x["project_name"]),
+                str(x["content"]),
+            )
+        )
+        return reminders
+
     # ---------- 需求迭代 ----------
 
     def create_requirement(
@@ -209,9 +325,15 @@ class ProjectService:
         project_id: str,
         input_: CreateRequirementInput,
     ) -> RequirementItem:
-        """新建一条迭代记录。``feature`` 为空时取 ``content``。"""
+        """新建一条迭代记录。``feature`` 为空时取 ``content``。
+
+        ``status == deferred`` 时强制 ``completion_deadline=None``（暂缓=远期规划，无固定时限）。
+        """
         now = _now()
         feature = input_.feature.strip() or input_.content.strip()
+        deadline = (
+            None if input_.status == RequirementStatus.DEFERRED else input_.completion_deadline
+        )
         item = RequirementItem(
             id=_new_id(),
             project_id=project_id,
@@ -220,6 +342,7 @@ class ProjectService:
             content=input_.content.strip(),
             status=input_.status,
             date=input_.date,
+            completion_deadline=deadline,
             created_at=now,
             updated_at=now,
         )
@@ -228,7 +351,8 @@ class ProjectService:
             conn.execute(
                 "INSERT INTO requirements"
                 "(id, project_id, module, feature, content, status, date,"
-                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " completion_deadline, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     item.id,
                     item.project_id,
@@ -237,6 +361,7 @@ class ProjectService:
                     item.content,
                     item.status.value,
                     item.date.isoformat(),
+                    item.completion_deadline.isoformat() if item.completion_deadline else None,
                     item.created_at.isoformat(),
                     item.updated_at.isoformat(),
                 ),
@@ -252,7 +377,11 @@ class ProjectService:
         item_id: str,
         input_: UpdateRequirementInput,
     ) -> RequirementItem:
-        """更新一条迭代记录的部分字段。"""
+        """更新一条迭代记录的部分字段。
+
+        ``status == deferred`` 时强制清空 ``completion_deadline``（优先级高于
+        ``input_.completion_deadline`` 和 ``input_.clear_completion_deadline``）。
+        """
         now = _now()
         sets: list[str] = []
         params: list[object] = []
@@ -271,6 +400,15 @@ class ProjectService:
         if input_.date is not None:
             sets.append("date = ?")
             params.append(input_.date.isoformat())
+        # completion_deadline 处理：deferred 优先清空，其次 clear 标志，最后设值
+        deadline_clear = (
+            input_.status == RequirementStatus.DEFERRED or input_.clear_completion_deadline
+        )
+        if deadline_clear:
+            sets.append("completion_deadline = NULL")
+        elif input_.completion_deadline is not None:
+            sets.append("completion_deadline = ?")
+            params.append(input_.completion_deadline.isoformat())
         sets.append("updated_at = ?")
         params.append(now.isoformat())
         params.append(item_id)
@@ -287,13 +425,23 @@ class ProjectService:
             return _row_to_requirement(row)
 
     def set_status(self, item_id: str, status: RequirementStatus) -> RequirementItem:
-        """仅改需求状态（高频操作）。"""
+        """仅改需求状态（高频操作）。
+
+        ``status == deferred`` 时同时清空 ``completion_deadline``（暂缓=远期规划，无固定时限）。
+        """
         now = _now()
         with self._db.transaction() as conn:
-            cur = conn.execute(
-                "UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?",
-                (status.value, now.isoformat(), item_id),
-            )
+            if status == RequirementStatus.DEFERRED:
+                cur = conn.execute(
+                    "UPDATE requirements SET status = ?, completion_deadline = NULL,"
+                    " updated_at = ? WHERE id = ?",
+                    (status.value, now.isoformat(), item_id),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?",
+                    (status.value, now.isoformat(), item_id),
+                )
             if cur.rowcount == 0:
                 raise NotFoundError(f"需求不存在: {item_id}")
             row = conn.execute("SELECT * FROM requirements WHERE id = ?", (item_id,)).fetchone()

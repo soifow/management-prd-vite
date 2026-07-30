@@ -37,15 +37,16 @@ export const useProjectsStore = defineStore('projects', () => {
 
   async function create(name: string) {
     const summary = await createProject(name)
-    summaries.value.push(summary)
+    // 刷新整张列表以拿到按当前口径正确排序后的位置（而非仅 push 到末尾）
+    await loadSummaries()
     activeProjectId.value = summary.id
     return summary
   }
 
   async function rename(projectId: string, name: string) {
     const summary = await renameProject(projectId, name)
-    const idx = summaries.value.findIndex((p) => p.id === projectId)
-    if (idx >= 0) summaries.value[idx] = summary
+    // rename 在 latest_activity 口径下会改变 list_date/排序，统一刷新
+    await loadSummaries()
     return summary
   }
 

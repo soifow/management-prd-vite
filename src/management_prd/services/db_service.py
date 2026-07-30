@@ -34,7 +34,7 @@ _DB_FILENAME = "requment.db"
 _LEGACY_DATA_FILENAME = "data.json"
 
 # 当前 SQLite schema 版本。新增表结构变更时 +1，并在 _self_check_schema 追加分支。
-CURRENT_DB_SCHEMA_VERSION = 1
+CURRENT_DB_SCHEMA_VERSION = 2
 
 # 建表语句（IF NOT EXISTS 幂等）
 _CREATE_META = """\
@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS requirements (
     content    TEXT NOT NULL,
     status     TEXT NOT NULL,
     date       TEXT NOT NULL,
+    completion_deadline TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -187,9 +188,12 @@ class DbService:
         """
         row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
         version = int(row["value"]) if row else 1
-        # 当前无结构变更分支；预留扩展点：
-        # if version < 2:
-        #     conn.execute("ALTER TABLE ...")
+        # v2: requirements 增加 completion_deadline（可空）。新增可空列用 ALTER TABLE ADD COLUMN，
+        # 纯增量变更无需备份/重建表。PRAGMA table_info 做幂等保护。
+        if version < 2:
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(requirements)")}
+            if "completion_deadline" not in cols:
+                conn.execute("ALTER TABLE requirements ADD COLUMN completion_deadline TEXT")
         conn.execute(
             "UPDATE _meta SET value=? WHERE key='schema_version'",
             (str(CURRENT_DB_SCHEMA_VERSION),),

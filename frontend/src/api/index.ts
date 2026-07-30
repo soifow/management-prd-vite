@@ -8,6 +8,7 @@ import type { ParsedRequirement, PickParseResult } from '@/types/import'
 import type { Project, ProjectSummary } from '@/types/project'
 import type { RequirementItem, RequirementStatus } from '@/types/requirement'
 import type { AppSettings } from '@/types/settings'
+import type { TodoReminder } from '@/types/todo'
 
 /** 后端错误信封抛出的统一异常类型。 */
 export class ApiError extends Error {
@@ -92,6 +93,7 @@ export interface CreateRequirementInput {
   content: string
   status: RequirementStatus
   date: string
+  completion_deadline: string | null
 }
 
 export interface UpdateRequirementInput {
@@ -100,6 +102,10 @@ export interface UpdateRequirementInput {
   content?: string
   status?: RequirementStatus
   date?: string
+  /** ISO yyyy-MM-dd（传入则设为该日期） */
+  completion_deadline?: string
+  /** true 则置 NULL（优先级高于 completion_deadline） */
+  clear_completion_deadline?: boolean
 }
 
 export const createRequirement = (
@@ -119,6 +125,11 @@ export const setRequirementStatus = (
 
 export const deleteRequirement = (itemId: string): Promise<boolean> =>
   invoke(() => bridge().delete_requirement(itemId))
+
+// ── 待办提醒 ──────────────────────────────────────────────
+
+export const getTodoReminders = (): Promise<TodoReminder[]> =>
+  invoke(() => bridge().get_todo_reminders())
 
 // ── 导入 / 导出 ──────────────────────────────────────────────
 

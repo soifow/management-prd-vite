@@ -144,8 +144,8 @@ async function onImportAsNew() {
         </div>
         <div class="item-meta">
           <span>{{ p.requirement_count }} 条需求</span>
-          <span v-if="p.latest_done_or_ui_date" class="date-tag">
-            最新 {{ formatDate(p.latest_done_or_ui_date) }}
+          <span v-if="p.list_date" class="date-tag">
+            最新 {{ formatDate(p.list_date) }}
           </span>
         </div>
       </div>

@@ -44,6 +44,7 @@ _STATUS_PRIORITY = {
     RequirementStatus.DEFERRED: 1,
     RequirementStatus.DONE: 2,
     RequirementStatus.UI_DONE_WAITING_BACKEND: 3,
+    RequirementStatus.BUG: 4,
 }
 
 

@@ -89,3 +89,15 @@
 本项目用 `_meta.migrated_json` 作为 data.json → SQLite 一次性迁移的守卫：`_migrate_json_if_present()` 在该键为 `'1'` 时直接跳过；成功才置 `'1'` 并删除 `data.json`，失败则回滚、不置标记、不删文件（下次启动重试，`INSERT OR IGNORE` 保证幂等）。
 
 **How to apply:** 未来新增任何「一次性数据迁移」时沿用此模式——在 `_meta` 加一个独立标记键做守卫，成功才置位、失败可重入，切勿用时间或外部状态判断是否已迁移。
+
+### 完成时限 + 待办提醒抽屉（2026-07-29）
+
+设计方案：`docs/design/completion-deadline-todo-reminder.md`。关键技术决策：
+
+- **新字段 `completion_deadline`**：`RequirementItem` / `CreateRequirementInput` 加 `completion_deadline: date | None`，与已有「迭代日期」`date` 区分（`date` 记录需求提出日期，`completion_deadline` 记录要求完成时限，留空=无时限）。SQLite schema **v1→v2**：新增可空列用 `ALTER TABLE ADD COLUMN`（纯增量，无需备份/重建表），`_self_check_schema` 内 `PRAGMA table_info` 做幂等保护。
+- **可空字段更新三态**：`UpdateRequirementInput` 用 `completion_deadline: date | None`（None=跳过）+ `clear_completion_deadline: bool`（True=置 NULL，优先级更高）区分「跳过/设值/清空」，**不依赖** pydantic `model_fields_set`。前端 `updateRequirement` 镜像同样语义。
+- **`deferred` 自动清空时限（三路径强制）**：状态改为 `deferred` 时 `completion_deadline` 强制置 NULL（暂缓=远期规划，无固定时限）。三条写入路径——`create_requirement`（新建时 status=deferred）、`update_requirement`（deferred 优先级高于 clear/set）、`set_status`（DateGroupView 快捷切换，UPDATE 追加 `completion_deadline = NULL`）——均由后端单点强制；前端编辑弹窗/功能详情 `watch(status)` 做即时清空反馈。设值后改回非 deferred 状态**不**自动恢复时限（需手动重设）。
+- **待办查询 `list_todo_reminders`**：后端单点完成阈值过滤、剩余天数计算、排序，返回扁平有序 `dict` 列表（带 `bucket`/`remaining_days`）。纳入规则（仅排除 `done`）：`deferred` 始终纳入置末尾「远期规划」组不受阈值影响；非 deferred 无时限项受 `show_no_deadline_in_todo` 开关控制；非 deferred 有时限项仅 `remaining_days <= reminder_threshold_days` 纳入，`<0` 归「已逾期」组置顶、`≥0` 归「剩余 N 天」组。排序键 `(bucket_rank, remaining_days, project_name, content)`。
+- **设置**：`AppSettings` 加 `reminder_threshold_days: int`（默认 7，`ge=0`，负值被 pydantic 拒绝）+ `show_no_deadline_in_todo: bool`（默认 True）；`settings_order` 默认工厂加 `'reminder'`。设置存 `settings.json`（非 DB），阈值与开关经 `WebApi.get_todo_reminders` 读取后传入查询。
+- **启动抽屉 + 跨项目跳转**：`App.vue` `onMounted` 末尾 `todoStore.load()` 后 `todoVisible=true` 自动弹出。点击非当前项目条目时用 `suppressProjectLoad` 守卫规避竞态——`watch(activeProjectId)→loadProject` 会重置 `selectedFeature`，跳转 handler 先置守卫、再 `select→loadProject→openFeature→selectIteration`，`finally` 释放。`AppNavMenu` 顶部铃铛菜单项 emit `'open-todo'` 供手动重开。
+- **已知限制**：导入/导出文本格式不含 `completion_deadline`；导出后重新导入会丢失时限（时限仅由 UI 维护的元数据）。`ParsedRequirement` 不加该字段。

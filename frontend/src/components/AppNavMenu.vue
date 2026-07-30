@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { Document, Setting } from '@element-plus/icons-vue'
+import { Bell, Document, Setting } from '@element-plus/icons-vue'
 
 defineProps<{ activeKey: 'workspace' | 'settings' }>()
-// 选中事件交给父组件：切换视图（workspace=工作区，settings=设置页）
-const emit = defineEmits<{ (e: 'select', key: 'workspace' | 'settings'): void }>()
+const emit = defineEmits<{
+  (e: 'select', key: 'workspace' | 'settings'): void
+  (e: 'open-todo'): void
+}>()
 
 function onSelectWorkspace() {
   emit('select', 'workspace')
@@ -11,15 +13,22 @@ function onSelectWorkspace() {
 function onSelectSettings() {
   emit('select', 'settings')
 }
+function onOpenTodo() {
+  emit('open-todo')
+}
 </script>
 
 <template>
   <el-aside width="64px" class="nav-col">
-    <!-- 顶部：工作区 -->
+    <!-- 顶部：工作区 + 待办提醒 -->
     <el-menu class="nav-menu" :collapse="true" :default-active="activeKey">
       <el-menu-item index="workspace" @click="onSelectWorkspace">
         <el-icon><Document /></el-icon>
         <template #title>工作区</template>
+      </el-menu-item>
+      <el-menu-item index="todo" @click="onOpenTodo">
+        <el-icon><Bell /></el-icon>
+        <template #title>待办提醒</template>
       </el-menu-item>
     </el-menu>
 

@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import { useProjectsStore } from '@/stores/projects'
+
 import {
   applyImport,
   applyImportAsNewProject,
@@ -135,6 +137,16 @@ export const useRequirementsStore = defineStore('requirements', () => {
     const item = await updateRequirement(itemId, patch)
     await refreshAfterMutation()
     if (selectedFeature.value) {
+      // 模块/功能被改时，迭代迁到新分组下：同步 selectedFeature 并按新 (module,feature) 重新加载，
+      // 否则仍用旧值查询会拿不到已迁移的迭代（当前详情变空）
+      const nextModule = patch.module ?? selectedFeature.value.module
+      const nextFeature = patch.feature ?? selectedFeature.value.feature
+      if (
+        nextModule !== selectedFeature.value.module ||
+        nextFeature !== selectedFeature.value.feature
+      ) {
+        selectedFeature.value = { module: nextModule, feature: nextFeature }
+      }
       await loadIterations(selectedFeature.value.module, selectedFeature.value.feature)
     }
     return item
@@ -168,6 +180,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     if (project.value) {
       project.value = await getProject(project.value.id)
       modules.value = await listModules(project.value.id)
+      // 同步刷新侧边栏项目汇总：需求的增删改会影响 list_date / requirement_count / 排序，
+      // 不调用则侧边栏停留在旧值（核心 bug 修复）。
+      await useProjectsStore().loadSummaries()
     }
   }
 
@@ -181,6 +196,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     if (!project.value) return
     project.value = await applyImport(project.value.id, requirements)
     modules.value = await listModules(project.value.id)
+    // 导入后侧边栏数量/日期需同步刷新
+    await useProjectsStore().loadSummaries()
   }
 
   /** 新建项目并将导入需求写入，返回新建的项目（后续由调用方刷新并选中）。 */

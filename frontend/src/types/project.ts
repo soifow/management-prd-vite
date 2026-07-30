@@ -9,11 +9,11 @@ export interface Project {
   updated_at: string
 }
 
-/** 项目汇总（侧边栏） */
+/** 项目汇总（侧边栏）。list_date 的口径由设置 project_list_date_mode 决定 */
 export interface ProjectSummary {
   id: string
   name: string
   requirement_count: number
-  latest_done_or_ui_date: string | null // ISO yyyy-MM-dd
+  list_date: string | null // ISO yyyy-MM-dd，口径随 project_list_date_mode 变化
   updated_at: string
 }

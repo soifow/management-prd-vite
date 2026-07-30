@@ -5,42 +5,95 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { MdEditor } from 'md-editor-v3'
 
+import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
 import type { RequirementStatus } from '@/types'
 import { STATUS_LABEL, STATUS_TAG_TYPE } from '@/types/requirement'
 import { formatDate } from '@/utils'
 import RequirementEditDialog from '@/components/RequirementEditDialog.vue'
 
+const projectsStore = useProjectsStore()
 const store = useRequirementsStore()
-const { selectedFeature, currentIterations, selectedIteration, selectedIterationId } =
+const { selectedFeature, currentIterations, selectedIteration, selectedIterationId, modules } =
   storeToRefs(store)
+const { activeProjectId } = storeToRefs(projectsStore)
 
 const editVisible = ref(false)
 
 // 编辑缓冲（避免直接改 store 引用）
 const bufferContent = ref('')
 const bufferStatus = ref<RequirementStatus>('todo')
+const bufferModule = ref('')
+const bufferFeature = ref('')
+/** 完成时限缓冲（null = 无时限） */
+const bufferDeadline = ref<string | null>(null)
+const featureOptions = ref<string[]>([])
+
+// 按当前模块拉取已有功能名候选（沿用编辑弹窗逻辑）
+async function refreshFeatureOptions() {
+  if (!activeProjectId.value) {
+    featureOptions.value = []
+    return
+  }
+  featureOptions.value = await store.listFeatures(activeProjectId.value, bufferModule.value)
+}
 
 watch(selectedIteration, (it) => {
   if (it) {
     bufferContent.value = it.content
     bufferStatus.value = it.status
+    bufferModule.value = it.module
+    bufferFeature.value = it.feature
+    bufferDeadline.value = it.completion_deadline
+    void refreshFeatureOptions()
   }
 })
+
+// 模块切换时刷新功能候选（当前输入的功能名保留，不强制清空）
+watch(bufferModule, () => {
+  void refreshFeatureOptions()
+})
+
+// 暂缓状态联动清空时限（前端即时反馈；后端亦强制）
+watch(bufferStatus, (s) => {
+  if (s === 'deferred') bufferDeadline.value = null
+})
+
+// el-autocomplete 建议回调：v-model 即输入框值，失焦天然保留
+function querySearchModule(query: string, cb: (results: { value: string }[]) => void) {
+  const q = query.trim().toLowerCase()
+  const list = modules.value
+    .filter((m) => m.toLowerCase().includes(q))
+    .map((m) => ({ value: m }))
+  cb(list)
+}
+
+function querySearchFeature(query: string, cb: (results: { value: string }[]) => void) {
+  const q = query.trim().toLowerCase()
+  const list = featureOptions.value
+    .filter((f) => f.toLowerCase().includes(q))
+    .map((f) => ({ value: f }))
+  cb(list)
+}
 
 const statusOptions: RequirementStatus[] = [
   'todo',
   'ui_done_waiting_backend',
   'done',
   'deferred',
+  'bug',
 ]
 
 async function onSave() {
   if (!selectedIteration.value) return
   try {
     await store.updateIteration(selectedIteration.value.id, {
+      module: bufferModule.value,
+      feature: bufferFeature.value,
       content: bufferContent.value,
       status: bufferStatus.value,
+      completion_deadline: bufferDeadline.value ?? undefined,
+      clear_completion_deadline: bufferDeadline.value === null,
     })
     ElMessage.success('已保存')
   } catch (e) {
@@ -89,12 +142,48 @@ function onBack() {
         <template v-if="selectedIteration">
           <div class="iter-head">
             <span class="iter-date">📅 {{ formatDate(selectedIteration.date) }}</span>
+            <el-autocomplete
+              v-model="bufferModule"
+              :fetch-suggestions="querySearchModule"
+              size="small"
+              clearable
+              :trigger-on-focus="true"
+              placeholder="所属模块"
+              style="width: 140px"
+            />
+            <el-autocomplete
+              v-model="bufferFeature"
+              :fetch-suggestions="querySearchFeature"
+              size="small"
+              clearable
+              :trigger-on-focus="true"
+              placeholder="功能名称"
+              style="width: 160px"
+            />
             <el-select v-model="bufferStatus" size="small" style="width: 160px">
               <el-option v-for="s in statusOptions" :key="s" :label="STATUS_LABEL[s]" :value="s" />
             </el-select>
+            <el-date-picker
+              v-model="bufferDeadline"
+              type="date"
+              value-format="YYYY-MM-DD"
+              clearable
+              placeholder="完成时限"
+              size="small"
+              style="width: 150px"
+              :disabled="bufferStatus === 'deferred'"
+            />
             <el-button type="primary" size="small" @click="onSave">保存</el-button>
           </div>
-          <MdEditor v-model="bufferContent" :preview="false" class="editor" />
+          <div class="editor-wrapper">
+            <MdEditor
+              v-model="bufferContent"
+              :key="selectedIteration?.id"
+              :preview="false"
+              :code-foldable="false"
+              class="editor"
+            />
+          </div>
         </template>
         <el-empty v-else description="该功能暂无迭代记录" />
       </div>
@@ -117,6 +206,9 @@ function onBack() {
                 @click="onJumpTo(it.id)"
               >
                 <span class="tl-content">{{ it.content || '（空）' }}</span>
+                <span v-if="it.completion_deadline" class="tl-deadline">
+                  🗓 {{ formatDate(it.completion_deadline) }}
+                </span>
                 <el-tag :type="STATUS_TAG_TYPE[it.status] as never" size="small">
                   {{ STATUS_LABEL[it.status] }}
                 </el-tag>
@@ -170,16 +262,28 @@ function onBack() {
   min-width: 0;
   min-height: 0;
 }
-/* md-editor 占据编辑区剩余高度，不随内容撑开 */
-.editor {
+/* md-editor 外层包裹：撑满编辑区剩余高度，内部编辑器 100% 自适应 */
+.editor-wrapper {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+}
+.editor-wrapper :deep(.md-editor) {
   height: 100%;
+}
+/* md-editor footer 字数统计垂直居中 */
+.editor-wrapper :deep(.md-editor-footer-item) {
+  align-items: center;
+}
+.editor-wrapper :deep(.md-editor-footer-item label),
+.editor-wrapper :deep(.md-editor-footer-item span) {
+  line-height: 24px;
 }
 .iter-head {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 8px;
 }
@@ -234,6 +338,12 @@ function onBack() {
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl-deadline {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #d97706;
   white-space: nowrap;
 }
 </style>
