@@ -17,3 +17,24 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/*
+ * md-editor-v3 footer 字数统计垂直居中（全局，详情页 + 弹窗统一）。
+ * 弹窗里编辑器包在 el-form-item 内，EP 的 .el-form-item__content{line-height:32px}
+ * 会沿继承链流到 footer 字数区（.md-editor-footer-left），把文字行盒撑到 32px、
+ * 在 24px 高的 footer 里贴底。详情页编辑器是普通 div 包着，无此继承，故正常。
+ * 这里钉死行高、显式居中对齐，绕开 el-dialog Teleport 到 body 导致 scoped :deep 不稳定的问题。
+ */
+.md-editor-footer-item {
+  align-items: center;
+}
+.md-editor-footer-item label,
+.md-editor-footer-item span {
+  line-height: 1;
+}
+/* 字数统计容器（v6.5.4 实际渲染类，库 CSS 未定义，行高靠继承）：钉死，中和 32px 继承 */
+.md-editor-footer-left,
+.md-editor-footer-left span,
+.md-editor-footer-left label {
+  line-height: 1;
+}

@@ -82,16 +82,23 @@ export const useBugsStore = defineStore('bugs', () => {
   }
 
   // 切项目自动加载（与 App.vue 的 requirements watch 并行，互不干扰）
-  watch(activeProjectId, (id) => {
-    if (id) {
-      void loadBugs(id)
-    } else {
-      bugs.value = []
-      modules.value = []
-      selectedBugId.value = null
-      linkedInfo.value = null
-    }
-  })
+  // immediate: 本 store 仅在用户进入 Bug 视图（BugPage 等组件首次渲染）时才实例化，
+  // 此时 activeProjectId 早在 App.vue onMounted 阶段就已设好。若不加 immediate，
+  // 这次注册的 watch 错过了已有首值而不触发，导致进 Bug 视图右侧列表为空、需手动切项目才加载。
+  watch(
+    activeProjectId,
+    (id) => {
+      if (id) {
+        void loadBugs(id)
+      } else {
+        bugs.value = []
+        modules.value = []
+        selectedBugId.value = null
+        linkedInfo.value = null
+      }
+    },
+    { immediate: true },
+  )
 
   function setViewMode(mode: ViewMode) {
     viewMode.value = mode

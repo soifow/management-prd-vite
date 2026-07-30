@@ -331,13 +331,7 @@ function onIterationChange(id: string | null) {
 .editor-wrapper :deep(.md-editor) {
   height: 100%;
 }
-.editor-wrapper :deep(.md-editor-footer-item) {
-  align-items: center;
-}
-.editor-wrapper :deep(.md-editor-footer-item label),
-.editor-wrapper :deep(.md-editor-footer-item span) {
-  line-height: 24px;
-}
+/* md-editor footer 字数统计垂直居中：见 styles/main.css 全局规则 */
 .link-pane {
   flex: 1;
   min-width: 220px;

@@ -226,13 +226,7 @@ async function onSubmit() {
 .editor-wrapper :deep(.md-editor) {
   height: 100%;
 }
-.edit-dialog :deep(.md-editor-footer-item) {
-  align-items: center;
-}
-.edit-dialog :deep(.md-editor-footer-item label),
-.edit-dialog :deep(.md-editor-footer-item span) {
-  line-height: 24px;
-}
+/* md-editor footer 字数统计垂直居中：见 styles/main.css 全局规则（弹窗/详情页统一处理） */
 .link-pickers {
   display: flex;
   gap: 10px;

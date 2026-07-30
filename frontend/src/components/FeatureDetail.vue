@@ -38,16 +38,22 @@ async function refreshFeatureOptions() {
   featureOptions.value = await store.listFeatures(activeProjectId.value, bufferModule.value)
 }
 
-watch(selectedIteration, (it) => {
-  if (it) {
-    bufferContent.value = it.content
-    bufferStatus.value = it.status
-    bufferModule.value = it.module
-    bufferFeature.value = it.feature
-    bufferDeadline.value = it.completion_deadline
-    void refreshFeatureOptions()
-  }
-})
+// immediate: 组件从设置页等切回时会被重新挂载（v-if），此时 selectedIteration
+// 引用未变、普通 watch 不触发，需立即用当前迭代回填编辑缓冲，否则编辑器显示为空。
+watch(
+  selectedIteration,
+  (it) => {
+    if (it) {
+      bufferContent.value = it.content
+      bufferStatus.value = it.status
+      bufferModule.value = it.module
+      bufferFeature.value = it.feature
+      bufferDeadline.value = it.completion_deadline
+      void refreshFeatureOptions()
+    }
+  },
+  { immediate: true },
+)
 
 // 模块切换时刷新功能候选（当前输入的功能名保留，不强制清空）
 watch(bufferModule, () => {
@@ -270,14 +276,7 @@ function onBack() {
 .editor-wrapper :deep(.md-editor) {
   height: 100%;
 }
-/* md-editor footer 字数统计垂直居中 */
-.editor-wrapper :deep(.md-editor-footer-item) {
-  align-items: center;
-}
-.editor-wrapper :deep(.md-editor-footer-item label),
-.editor-wrapper :deep(.md-editor-footer-item span) {
-  line-height: 24px;
-}
+/* md-editor footer 字数统计垂直居中：见 styles/main.css 全局规则 */
 .iter-head {
   flex-shrink: 0;
   display: flex;
