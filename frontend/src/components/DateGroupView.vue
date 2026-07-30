@@ -66,6 +66,13 @@ async function onStatusChange(item: RequirementItem, status: RequirementStatus) 
             class="req-row"
             @click="onRowClick(item)"
           >
+            <el-tag
+              v-if="item.status === 'done'"
+              type="success"
+              size="small"
+              effect="light"
+              class="done-tag"
+            >完成</el-tag>
             <div class="req-info">
               <span class="req-feature">{{ item.feature || '（未命名）' }}</span>
               <span class="req-content" v-if="item.feature && item.feature !== item.content">
@@ -151,6 +158,9 @@ async function onStatusChange(item: RequirementItem, status: RequirementStatus) 
   gap: 2px;
   min-width: 0;
   flex: 1;
+}
+.done-tag {
+  flex-shrink: 0;
 }
 .req-feature {
   font-size: 14px;
