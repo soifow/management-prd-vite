@@ -5,7 +5,7 @@ import { storeToRefs } from 'pinia'
 import { useBugsStore } from '@/stores/bugs'
 import { BUG_STATUS_LABEL, BUG_STATUS_TAG_TYPE, LEVEL_LABEL, LEVEL_TAG_TYPE } from '@/types/bug'
 import type { BugItem, BugStatus } from '@/types'
-import { formatDate } from '@/utils'
+import { formatDate, sortBugs } from '@/utils'
 
 const store = useBugsStore()
 const { filteredBugs } = storeToRefs(store)
@@ -24,7 +24,7 @@ const grouped = computed<ModuleGroup[]>(() => {
     else map.set(key, [b])
   }
   return Array.from(map.entries())
-    .map(([module, bugs]) => ({ module, bugs }))
+    .map(([module, bugs]) => ({ module, bugs: sortBugs(bugs) }))
     .sort((a, b) => a.module.localeCompare(b.module, 'zh-Hans-CN'))
 })
 
@@ -69,6 +69,7 @@ async function onStatusChange(b: BugItem, status: BugStatus) {
           @click="onOpenBug(b.id)"
         >
           <div class="bug-head">
+            <span v-if="b.status === 'fixed'" class="fixed-badge">已修复</span>
             <el-tag :type="LEVEL_TAG_TYPE[b.level] as never" size="small" effect="dark">
               {{ LEVEL_LABEL[b.level] }}
             </el-tag>
@@ -145,6 +146,16 @@ async function onStatusChange(b: BugItem, status: BugStatus) {
   gap: 8px;
   margin-bottom: 6px;
   flex-wrap: wrap;
+}
+.fixed-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #16a34a;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 4px;
+  padding: 1px 6px;
+  line-height: 18px;
 }
 .bug-date {
   font-size: 12px;

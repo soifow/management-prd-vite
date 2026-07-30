@@ -5,7 +5,7 @@ import { storeToRefs } from 'pinia'
 import { useBugsStore } from '@/stores/bugs'
 import { BUG_STATUS_LABEL, BUG_STATUS_TAG_TYPE, LEVEL_LABEL, LEVEL_TAG_TYPE } from '@/types/bug'
 import type { BugItem, BugStatus } from '@/types'
-import { formatDate } from '@/utils'
+import { formatDate, sortBugs } from '@/utils'
 
 const store = useBugsStore()
 const { filteredBugs } = storeToRefs(store)
@@ -23,7 +23,7 @@ const groups = computed<DateGroup[]>(() => {
     else map.set(b.date, [b])
   }
   return Array.from(map.entries())
-    .map(([date, bugs]) => ({ date, bugs }))
+    .map(([date, bugs]) => ({ date, bugs: sortBugs(bugs) }))
     .sort((a, b) => b.date.localeCompare(a.date))
 })
 
@@ -68,6 +68,7 @@ async function onStatusChange(b: BugItem, status: BugStatus) {
         >
           <div class="bug-info">
             <div class="bug-head">
+              <span v-if="b.status === 'fixed'" class="fixed-badge">已修复</span>
               <el-tag :type="LEVEL_TAG_TYPE[b.level] as never" size="small" effect="dark">
                 {{ LEVEL_LABEL[b.level] }}
               </el-tag>
@@ -150,6 +151,16 @@ async function onStatusChange(b: BugItem, status: BugStatus) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.fixed-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #16a34a;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 4px;
+  padding: 1px 6px;
+  line-height: 18px;
 }
 .bug-module {
   font-size: 12px;
