@@ -45,6 +45,15 @@ const moduleOptions = computed(() => {
   return Array.from(opts).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
 })
 
+// 关联是否处于「编辑中」：缓冲已偏离已保存的关联（选中了新迭代 / 发起了清除）。
+// 编辑中时隐藏已保存关联卡片（active/stale），改为显示两级下拉——否则用户刚在下拉里
+// 选定一个迭代（尚未保存）就会因 bufferLinkedId 非空、linkedInfo 仍为 null 被误判成 stale。
+const linkDirty = computed(
+  () =>
+    bufferClearLinked.value ||
+    bufferLinkedId.value !== currentBug.value?.linked_iteration_id,
+)
+
 // 关联功能下拉：当前选中模块下需求的 feature 列表
 async function refreshFeatures() {
   if (!activeProjectId.value || !bufferModule.value) {
@@ -87,11 +96,15 @@ function resetBuffer(b: BugItem | null) {
   iterations.value = []
 }
 
-// 切换 bug 时回填缓冲 + 解析关联
-watch(currentBug, (b) => {
+// 切换 bug 时回填缓冲 + 解析关联 + 强制加载功能下拉
+// 必须显式触发 refreshFeatures：watch(currentBug, immediate) 的回调是同步执行的，
+// 此时下方 watch(bufferModule) 尚未注册，resetBuffer 里对 bufferModule 的赋值无人监听，
+// 导致「未关联 bug」首开时 features 永远为空（对照 BugEditDialog 的「打开即加载」范式）。
+watch(currentBug, async (b) => {
   if (!b) return
   resetBuffer(b)
   void bugsStore.refreshLinked()
+  await refreshFeatures()
 }, { immediate: true })
 
 // 关联解析完成后，若有链接，回填功能名以便下拉显示
@@ -136,6 +149,8 @@ async function onClearLinked() {
   bufferLinkedId.value = null
   bufferClearLinked.value = true
   linkedFeature.value = ''
+  // 清空迭代选项：清除后迭代下拉不应残留上次关联的选项（功能选项随模块复用，不清）
+  iterations.value = []
   ElMessage.info('清除后点击保存生效')
 }
 
@@ -223,8 +238,8 @@ function onIterationChange(id: string | null) {
       <div class="link-pane">
         <div class="link-title">关联需求迭代</div>
         <div class="link-scroll">
-          <!-- 关联当前生效 -->
-          <div v-if="linkedInfo" class="link-card active">
+          <!-- 关联当前生效：有已保存且解析成功的关联，且未在编辑 -->
+          <div v-if="linkedInfo && !linkDirty" class="link-card active">
             <div class="link-line"><span class="lk-label">模块</span>{{ linkedInfo.module }}</div>
             <div class="link-line"><span class="lk-label">功能</span>{{ linkedInfo.feature }}</div>
             <div class="link-line"><span class="lk-label">日期</span>📅 {{ formatDate(linkedInfo.date) }}</div>
@@ -233,14 +248,14 @@ function onIterationChange(id: string | null) {
             <el-button size="small" @click="onClearLinked">清除关联</el-button>
           </div>
 
-          <!-- 已关联但失效 -->
-          <div v-else-if="bufferLinkedId" class="link-card stale">
+          <!-- 已关联但失效：有已保存关联但解析为空，且未在编辑 -->
+          <div v-else-if="currentBug.linked_iteration_id && !linkDirty" class="link-card stale">
             <div class="stale-text">⚠ 关联已失效（对应需求迭代已被删除）</div>
             <el-button size="small" @click="onClearLinked">清除关联</el-button>
           </div>
 
-          <!-- 重新选择关联 -->
-          <div v-if="!linkedInfo && !bufferLinkedId" class="link-card select-link">
+          <!-- 重新选择关联：无已保存关联，或正在编辑（选中/清除中） -->
+          <div v-else class="link-card select-link">
             <el-select
               v-model="linkedFeature"
               size="small"

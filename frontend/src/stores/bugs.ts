@@ -65,14 +65,17 @@ export const useBugsStore = defineStore('bugs', () => {
     return list
   })
 
-  async function loadBugs(projectId: string) {
+  async function loadBugs(projectId: string, keepSelection = false) {
     loading.value = true
     try {
       bugs.value = await listBugs(projectId)
       modules.value = await listModules(projectId)
-      // 切换项目时关闭详情
-      selectedBugId.value = null
-      linkedInfo.value = null
+      // 默认切换项目时关闭详情；keepSelection=true 时保留当前选中 bug
+      // （保存更新后重拉列表不应丢掉 currentBug，否则详情页会误判关联失效）。
+      if (!keepSelection) {
+        selectedBugId.value = null
+        linkedInfo.value = null
+      }
     } finally {
       loading.value = false
     }
@@ -125,7 +128,10 @@ export const useBugsStore = defineStore('bugs', () => {
 
   async function updateBugItem(id: string, patch: UpdateBugInput) {
     const b = await updateBug(id, patch)
-    await loadBugs(activeProjectId.value!)
+    // 保留当前选中 bug：重拉列表会替换 bugs.value，但 selectedBugId 仍指向同一条，
+    // currentBug 会自然更新为最新值（含新关联），详情页据此刷新关联信息。
+    await loadBugs(activeProjectId.value!, true)
+    await refreshLinked()
     return b
   }
 
