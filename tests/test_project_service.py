@@ -663,8 +663,8 @@ def test_set_status_non_deferred_keeps_deadline(service: ProjectService) -> None
             completion_deadline=date(2026, 2, 1),
         ),
     )
-    updated = service.set_status(item.id, RequirementStatus.BUG)
-    assert updated.status == RequirementStatus.BUG
+    updated = service.set_status(item.id, RequirementStatus.UI_DONE_WAITING_BACKEND)
+    assert updated.status == RequirementStatus.UI_DONE_WAITING_BACKEND
     assert updated.completion_deadline == date(2026, 2, 1)
 
 

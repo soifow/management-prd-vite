@@ -4,6 +4,13 @@
 
 import { isApiErrorEnvelope } from '@/types/api'
 import type { StorageInfo } from '@/types/api'
+import type {
+  BugItem,
+  BugLinkInfo,
+  BugStatus,
+  CreateBugInput,
+  UpdateBugInput,
+} from '@/types/bug'
 import type { ParsedRequirement, PickParseResult } from '@/types/import'
 import type { Project, ProjectSummary } from '@/types/project'
 import type { RequirementItem, RequirementStatus } from '@/types/requirement'
@@ -125,6 +132,26 @@ export const setRequirementStatus = (
 
 export const deleteRequirement = (itemId: string): Promise<boolean> =>
   invoke(() => bridge().delete_requirement(itemId))
+
+// ── Bug ──────────────────────────────────────────────────
+
+export const listBugs = (projectId: string): Promise<BugItem[]> =>
+  invoke(() => bridge().list_bugs(projectId))
+
+export const createBug = (projectId: string, input: CreateBugInput): Promise<BugItem> =>
+  invoke(() => bridge().create_bug(projectId, input))
+
+export const updateBug = (bugId: string, patch: UpdateBugInput): Promise<BugItem> =>
+  invoke(() => bridge().update_bug(bugId, patch))
+
+export const deleteBug = (bugId: string): Promise<boolean> =>
+  invoke(() => bridge().delete_bug(bugId))
+
+export const setBugStatus = (bugId: string, status: BugStatus): Promise<BugItem> =>
+  invoke(() => bridge().set_bug_status(bugId, status))
+
+export const resolveBugLink = (linkedIterationId: string): Promise<BugLinkInfo | null> =>
+  invoke(() => bridge().resolve_bug_link(linkedIterationId))
 
 // ── 待办提醒 ──────────────────────────────────────────────
 

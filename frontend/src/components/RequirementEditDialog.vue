@@ -100,7 +100,6 @@ const statusOptions: RequirementStatus[] = [
   'ui_done_waiting_backend',
   'done',
   'deferred',
-  'bug',
 ]
 
 async function onSubmit() {

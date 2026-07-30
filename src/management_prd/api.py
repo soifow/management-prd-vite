@@ -27,6 +27,7 @@ from management_prd.errors import (
     NotFoundError,
     StorageError,
 )
+from management_prd.models.bug import BugLevel, BugStatus, CreateBugInput, UpdateBugInput
 from management_prd.models.data import (
     CreateRequirementInput,
     ParsedImport,
@@ -35,6 +36,7 @@ from management_prd.models.data import (
 )
 from management_prd.models.requirement import RequirementItem, RequirementStatus
 from management_prd.services.bootstrap_service import BootstrapService
+from management_prd.services.bug_service import BugService
 from management_prd.services.db_service import DbService
 from management_prd.services.importer import parse_import
 from management_prd.services.project_service import ProjectService
@@ -54,6 +56,7 @@ class WebApi:
     def __init__(
         self,
         project_service: ProjectService | None = None,
+        bug_service: BugService | None = None,
         settings_service: SettingsService | None = None,
         bootstrap: BootstrapService | None = None,
     ) -> None:
@@ -62,7 +65,11 @@ class WebApi:
             project_service = ProjectService(db)
             if bootstrap is None:
                 bootstrap = db.bootstrap
+        else:
+            # 外部注入 project_service 时需自带 db 以便复用给 bug_service。
+            db = project_service._db  # type: ignore[attr-defined]
         self._project_service = project_service
+        self._bug_service = bug_service or BugService(db)
         self._settings_service = settings_service or SettingsService(bootstrap)
         self._window: webview.Window | None = None
 
@@ -166,6 +173,52 @@ class WebApi:
     def delete_requirement(self, item_id: str) -> object:
         try:
             return self._project_service.delete_requirement(item_id)
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    # ---------- Bug ----------
+
+    def list_bugs(self, project_id: str) -> object:
+        try:
+            bugs = self._bug_service.list_bugs(project_id)
+            return [b.model_dump(mode="json") for b in bugs]
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def create_bug(self, project_id: str, input_dict: dict[str, object]) -> object:
+        try:
+            input_ = self._coerce_create_bug_input(input_dict)
+            bug = self._bug_service.create_bug(project_id, input_)
+            return bug.model_dump(mode="json")
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def update_bug(self, bug_id: str, patch: dict[str, object]) -> object:
+        try:
+            input_ = self._coerce_update_bug_input(patch)
+            bug = self._bug_service.update_bug(bug_id, input_)
+            return bug.model_dump(mode="json")
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def delete_bug(self, bug_id: str) -> object:
+        try:
+            return self._bug_service.delete_bug(bug_id)
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def set_bug_status(self, bug_id: str, status: str) -> object:
+        try:
+            bs = BugStatus(status)
+            bug = self._bug_service.set_bug_status(bug_id, bs)
+            return bug.model_dump(mode="json")
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def resolve_bug_link(self, linked_iteration_id: str) -> object:
+        """解析 bug 关联的需求迭代，返回跳转信息或 None（关联已失效）。"""
+        try:
+            return self._bug_service.resolve_bug_link(linked_iteration_id)
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
@@ -360,6 +413,56 @@ class WebApi:
             date=d_val,
             completion_deadline=cd,
             clear_completion_deadline=clear_deadline,
+        )
+
+    @staticmethod
+    def _coerce_create_bug_input(d: dict[str, object]) -> CreateBugInput:
+        """把前端传入的 dict 转换为 CreateBugInput。"""
+        module = d.get("module", "")
+        content = d.get("content", "")
+        if not isinstance(module, str) or not isinstance(content, str):
+            raise ValueError("module/content 必须是字符串")
+        level_raw = d.get("level", BugLevel.P3.value)
+        if not isinstance(level_raw, str):
+            raise ValueError("level 必须是字符串")
+        level = BugLevel(level_raw)
+        status_raw = d.get("status", BugStatus.OPEN.value)
+        if not isinstance(status_raw, str):
+            raise ValueError("status 必须是字符串")
+        status = BugStatus(status_raw)
+        date_raw = d.get("date")
+        if not isinstance(date_raw, str) or not date_raw:
+            raise ValueError("date 必填")
+        d_val = date.fromisoformat(date_raw)
+        linked_raw = d.get("linked_iteration_id")
+        if linked_raw is not None and not isinstance(linked_raw, str):
+            raise ValueError("linked_iteration_id 必须是字符串")
+        return CreateBugInput(
+            module=module,
+            content=content,
+            level=level,
+            status=status,
+            linked_iteration_id=linked_raw if isinstance(linked_raw, str) and linked_raw else None,
+            date=d_val,
+        )
+
+    @staticmethod
+    def _coerce_update_bug_input(d: dict[str, object]) -> UpdateBugInput:
+        """把前端传入的 dict 转换为 UpdateBugInput。"""
+        level_raw = d.get("level")
+        status_raw = d.get("status")
+        date_raw = d.get("date")
+        linked_raw = d.get("linked_iteration_id")
+        module = d.get("module")
+        content = d.get("content")
+        return UpdateBugInput(
+            module=module if isinstance(module, str) else None,
+            content=content if isinstance(content, str) else None,
+            level=BugLevel(level_raw) if isinstance(level_raw, str) else None,
+            status=BugStatus(status_raw) if isinstance(status_raw, str) else None,
+            date=date.fromisoformat(date_raw) if isinstance(date_raw, str) and date_raw else None,
+            linked_iteration_id=linked_raw if isinstance(linked_raw, str) and linked_raw else None,
+            clear_linked=bool(d.get("clear_linked", False)),
         )
 
     def _open_text_file(self) -> str | None:

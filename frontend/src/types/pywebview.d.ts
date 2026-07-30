@@ -3,6 +3,7 @@
  */
 
 import type { ApiErrorEnvelope } from './api'
+import type { BugItem, BugLinkInfo, BugStatus, CreateBugInput, UpdateBugInput } from './bug'
 import type { ParsedRequirement, PickParseResult } from './import'
 import type { Project, ProjectSummary } from './project'
 import type { RequirementItem, RequirementStatus } from './requirement'
@@ -59,6 +60,14 @@ export interface PyWebViewApi {
   ): Promise<RequirementItem | ApiErrorEnvelope>
   delete_requirement(item_id: string): Promise<boolean | ApiErrorEnvelope>
   get_todo_reminders(): Promise<TodoReminder[] | ApiErrorEnvelope>
+
+  // ── Bug ──
+  list_bugs(project_id: string): Promise<BugItem[] | ApiErrorEnvelope>
+  create_bug(project_id: string, input: CreateBugInput): Promise<BugItem | ApiErrorEnvelope>
+  update_bug(bug_id: string, patch: UpdateBugInput): Promise<BugItem | ApiErrorEnvelope>
+  delete_bug(bug_id: string): Promise<boolean | ApiErrorEnvelope>
+  set_bug_status(bug_id: string, status: BugStatus): Promise<BugItem | ApiErrorEnvelope>
+  resolve_bug_link(linked_iteration_id: string): Promise<BugLinkInfo | null | ApiErrorEnvelope>
 
   // ── 导入 / 导出 ──
   pick_and_parse_import(): Promise<PickParseResult | null | ApiErrorEnvelope>

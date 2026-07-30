@@ -1,4 +1,5 @@
 export * from './api'
+export * from './bug'
 export * from './requirement'
 export * from './project'
 export * from './import'

@@ -189,7 +189,8 @@ def test_v1_db_migrated_to_v2_adds_column_and_keeps_data(tmp_path: Path) -> None
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(requirements)")}
         assert "completion_deadline" in cols
         row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
-        assert int(row["value"]) == 2
+        # v1 -> v2(补列) -> v3(bugs 表)，现版本升到 3
+        assert int(row["value"]) == 3
         # 历史数据仍在，且 deadline 为 NULL
         req = conn.execute("SELECT content, completion_deadline FROM requirements").fetchone()
         assert req["content"] == "c1"
@@ -208,3 +209,109 @@ def test_v2_migration_is_idempotent(tmp_path: Path) -> None:
             "SELECT COUNT(*) FROM pragma_table_info('requirements') WHERE name='completion_deadline'"
         ).fetchone()[0]
         assert cnt == 1
+
+
+def _build_v2_db_with_bugs(db_path: Path) -> None:
+    """手工构造一个 schema_version=2、含 status='bug' 需求的旧库。"""
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("INSERT INTO _meta(key, value) VALUES ('schema_version', '2')")
+    conn.execute("INSERT INTO _meta(key, value) VALUES ('migrated_json', '1')")
+    conn.execute(
+        """CREATE TABLE projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE requirements (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            module TEXT NOT NULL DEFAULT '',
+            feature TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL,
+            status TEXT NOT NULL,
+            date TEXT NOT NULL,
+            completion_deadline TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO projects(id, name, created_at, updated_at) VALUES ('p1', '项目A', 't', 't')"
+    )
+    # bug 行（迁移目标）
+    conn.execute(
+        "INSERT INTO requirements(id, project_id, module, feature, content, status, date,"
+        " completion_deadline, created_at, updated_at)"
+        " VALUES ('bug1', 'p1', 'ModA', 'Feature1', 'bug content', 'bug', '2026-01-01',"
+        " NULL, 't', 't')"
+    )
+    # 正常需求行（不受迁移影响）
+    conn.execute(
+        "INSERT INTO requirements(id, project_id, module, feature, content, status, date,"
+        " completion_deadline, created_at, updated_at)"
+        " VALUES ('req1', 'p1', 'ModA', 'Feature1', 'req content', 'done', '2026-01-02',"
+        " NULL, 't', 't')"
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_v2_db_migrated_to_v3_moves_bugs(tmp_path: Path) -> None:
+    """旧库（v2 含 status='bug' 行）启动：bug 行迁入 bugs 表、从 requirements 删除、版本升 3。"""
+    db_path = tmp_path / "requment.db"
+    _build_v2_db_with_bugs(db_path)
+
+    DbService(db_path=db_path).init_db()
+
+    with DbService(db_path=db_path).transaction() as conn:
+        # 版本升到 3
+        row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
+        assert int(row["value"]) == 3
+
+        # requirements 不再有 bug 行
+        bug_count = conn.execute(
+            "SELECT COUNT(*) FROM requirements WHERE status='bug'"
+        ).fetchone()[0]
+        assert bug_count == 0
+
+        # 正常需求行完好
+        req = conn.execute("SELECT content FROM requirements WHERE id='req1'").fetchone()
+        assert req["content"] == "req content"
+
+        # bugs 表有迁移来的行
+        bugs = conn.execute("SELECT * FROM bugs").fetchall()
+        assert len(bugs) == 1
+        b = bugs[0]
+        assert b["id"] == "bug1"  # id 复用
+        assert b["module"] == "ModA"
+        assert b["content"] == "bug content"
+        assert b["level"] == "P3"  # 默认级别
+        assert b["status"] == "open"  # 默认待修复
+        assert b["linked_iteration_id"] is None
+        assert b["date"] == "2026-01-01"
+
+        # bugs 表存在
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "bugs" in tables
+
+
+def test_v3_migration_is_idempotent(tmp_path: Path) -> None:
+    """已是 v3 的库再次 init 不重复迁移。"""
+    db_path = tmp_path / "requment.db"
+    _build_v2_db_with_bugs(db_path)
+    DbService(db_path=db_path).init_db()
+
+    # 第二次 init 不应报错，bug 行数不变
+    DbService(db_path=db_path).init_db()
+    with DbService(db_path=db_path).transaction() as conn:
+        bugs = conn.execute("SELECT COUNT(*) FROM bugs").fetchone()[0]
+        assert bugs == 1
+        req_bugs = conn.execute(
+            "SELECT COUNT(*) FROM requirements WHERE status='bug'"
+        ).fetchone()[0]
+        assert req_bugs == 0

@@ -16,8 +16,9 @@ import RequirementTree from '@/components/RequirementTree.vue'
 import DateGroupView from '@/components/DateGroupView.vue'
 import FeatureDetail from '@/components/FeatureDetail.vue'
 import SettingsPage from '@/components/SettingsPage.vue'
+import BugPage from '@/components/BugPage.vue'
 import TodoDrawer from '@/components/TodoDrawer.vue'
-import type { TodoReminder } from '@/types'
+import type { BugLinkInfo, TodoReminder } from '@/types'
 
 const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
@@ -26,8 +27,8 @@ const todoStore = useTodoStore()
 const { activeProjectId } = storeToRefs(projectsStore)
 const { selectedFeature, viewMode } = storeToRefs(requirementsStore)
 
-/** 当前视图：workspace=工作区，settings=设置页 */
-const currentView = ref<'workspace' | 'settings'>('workspace')
+/** 当前视图：workspace=工作区，bug=Bug 管理，settings=设置页 */
+const currentView = ref<'workspace' | 'bug' | 'settings'>('workspace')
 
 /** 待办抽屉显隐：启动后自动打开 */
 const todoVisible = ref(false)
@@ -68,13 +69,32 @@ watch(activeProjectId, async (id) => {
   }
 })
 
-function onNavSelect(key: 'workspace' | 'settings') {
+function onNavSelect(key: 'workspace' | 'bug' | 'settings') {
   currentView.value = key
 }
 
 /** 设置页保存：切回工作区 */
 function onSettingsSave() {
   currentView.value = 'workspace'
+}
+
+/**
+ * Bug 详情「跳转查看关联迭代」：切到工作区、定位到对应需求迭代。
+ * 复用 suppressProjectLoad 守卫避免被 activeProjectId watch 打断（同 onJumpToItem）。
+ */
+async function onJumpToRequirement(link: BugLinkInfo) {
+  currentView.value = 'workspace'
+  suppressProjectLoad.value = true
+  try {
+    projectsStore.select(link.project_id)
+    await requirementsStore.loadProject(link.project_id)
+    await requirementsStore.openFeature(link.module, link.feature)
+    requirementsStore.selectIteration(link.item_id)
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '跳转失败')
+  } finally {
+    suppressProjectLoad.value = false
+  }
 }
 
 /** 手动重新打开待办抽屉（顶部菜单铃铛） */
@@ -115,6 +135,11 @@ async function onJumpToItem(item: TodoReminder) {
     <!-- 设置页：替换整个右侧区域 -->
     <template v-if="currentView === 'settings'">
       <SettingsPage @save="onSettingsSave" />
+    </template>
+
+    <!-- Bug 管理：独立侧边栏 + 主内容 -->
+    <template v-else-if="currentView === 'bug'">
+      <BugPage @jump-requirement="onJumpToRequirement" />
     </template>
 
     <!-- 工作区：项目侧边栏 + 主内容 -->

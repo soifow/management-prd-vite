@@ -37,7 +37,6 @@ const statusOptions: RequirementStatus[] = [
   'ui_done_waiting_backend',
   'done',
   'deferred',
-  'bug',
 ]
 
 function open(parsed: ParsedRequirement[], m: 'current' | 'new' = 'current', filename = '') {

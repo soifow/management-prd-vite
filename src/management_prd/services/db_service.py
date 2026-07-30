@@ -34,7 +34,7 @@ _DB_FILENAME = "requment.db"
 _LEGACY_DATA_FILENAME = "data.json"
 
 # 当前 SQLite schema 版本。新增表结构变更时 +1，并在 _self_check_schema 追加分支。
-CURRENT_DB_SCHEMA_VERSION = 2
+CURRENT_DB_SCHEMA_VERSION = 3
 
 # 建表语句（IF NOT EXISTS 幂等）
 _CREATE_META = """\
@@ -66,11 +66,30 @@ CREATE TABLE IF NOT EXISTS requirements (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 )
 """
+_CREATE_BUGS = """\
+CREATE TABLE IF NOT EXISTS bugs (
+    id                  TEXT PRIMARY KEY,
+    project_id          TEXT NOT NULL,
+    module              TEXT NOT NULL,
+    content             TEXT NOT NULL,
+    level               TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'open',
+    linked_iteration_id TEXT,
+    date                TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+)
+"""
 
 _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_req_project ON requirements(project_id)",
     "CREATE INDEX IF NOT EXISTS idx_req_modfeat ON requirements(project_id, module, feature)",
     "CREATE INDEX IF NOT EXISTS idx_req_date ON requirements(project_id, date)",
+    "CREATE INDEX IF NOT EXISTS idx_bug_project ON bugs(project_id)",
+    "CREATE INDEX IF NOT EXISTS idx_bug_module ON bugs(project_id, module)",
+    "CREATE INDEX IF NOT EXISTS idx_bug_date ON bugs(project_id, date)",
+    "CREATE INDEX IF NOT EXISTS idx_bug_linked ON bugs(linked_iteration_id)",
 )
 
 
@@ -161,6 +180,7 @@ class DbService:
             conn.execute(_CREATE_META)
             conn.execute(_CREATE_PROJECTS)
             conn.execute(_CREATE_REQUIREMENTS)
+            conn.execute(_CREATE_BUGS)
             for idx in _INDEXES:
                 conn.execute(idx)
             # _meta 默认种子（已存在则忽略）
@@ -194,6 +214,45 @@ class DbService:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(requirements)")}
             if "completion_deadline" not in cols:
                 conn.execute("ALTER TABLE requirements ADD COLUMN completion_deadline TEXT")
+        # v3: 新增 bugs 表 + 一次性把 status='bug' 的需求迁入并从 requirements 删除。
+        # 纯增量（CREATE TABLE IF NOT EXISTS），无破坏。幂等性靠：
+        #  ① init_db 事务原子回滚（init_db 失败时撤销本分支全部操作）
+        #  ② IF NOT EXISTS / INSERT OR IGNORE（复用原 id）/ DELETE（重跑 0 行）
+        #  ③ 版本升到 3 后分支不再执行
+        # 不加额外 _meta 守卫键：纯库内迁移无文件副作用，事务 + 上两条已构成完整可重入。
+        if version < 3:
+            conn.execute(_CREATE_BUGS)
+            for idx in (
+                "CREATE INDEX IF NOT EXISTS idx_bug_project ON bugs(project_id)",
+                "CREATE INDEX IF NOT EXISTS idx_bug_module ON bugs(project_id, module)",
+                "CREATE INDEX IF NOT EXISTS idx_bug_date ON bugs(project_id, date)",
+                "CREATE INDEX IF NOT EXISTS idx_bug_linked ON bugs(linked_iteration_id)",
+            ):
+                conn.execute(idx)
+            # 1) 读出旧 status='bug' 需求（须在 DELETE 之前）
+            bug_rows = conn.execute(
+                "SELECT id, project_id, module, content, date, created_at, updated_at "
+                "FROM requirements WHERE status = 'bug'"
+            ).fetchall()
+            # 2) 迁入 bugs（level=P3 默认、status=open 默认、linked 留空、id 复用）
+            for r in bug_rows:
+                conn.execute(
+                    "INSERT OR IGNORE INTO bugs"
+                    "(id, project_id, module, content, level, status, linked_iteration_id,"
+                    " date, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, 'P3', 'open', NULL, ?, ?, ?)",
+                    (
+                        r["id"],
+                        r["project_id"],
+                        r["module"],
+                        r["content"],
+                        r["date"],
+                        r["created_at"],
+                        r["updated_at"],
+                    ),
+                )
+            # 3) 从 requirements 删除（重跑时 0 行，幂等）
+            conn.execute("DELETE FROM requirements WHERE status = 'bug'")
         conn.execute(
             "UPDATE _meta SET value=? WHERE key='schema_version'",
             (str(CURRENT_DB_SCHEMA_VERSION),),

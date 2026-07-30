@@ -18,6 +18,7 @@ import webview
 
 from management_prd.api import WebApi
 from management_prd.errors import ManagementPrdError
+from management_prd.services.bug_service import BugService
 from management_prd.services.db_service import DbService
 from management_prd.services.project_service import ProjectService
 from management_prd.services.settings_service import SettingsService
@@ -68,9 +69,11 @@ def run(dev: bool = False) -> int:
         db = DbService()
         db.init_db()
         project_service = ProjectService(db)
+        bug_service = BugService(db)
         settings_service = SettingsService(db.bootstrap)
         api = WebApi(
             project_service=project_service,
+            bug_service=bug_service,
             settings_service=settings_service,
         )
     except ManagementPrdError as exc:

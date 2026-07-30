@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { Bell, Document, Setting } from '@element-plus/icons-vue'
+import { Bell, Document, Setting, WarningFilled } from '@element-plus/icons-vue'
 
-defineProps<{ activeKey: 'workspace' | 'settings' }>()
+defineProps<{ activeKey: 'workspace' | 'settings' | 'bug' }>()
 const emit = defineEmits<{
-  (e: 'select', key: 'workspace' | 'settings'): void
+  (e: 'select', key: 'workspace' | 'settings' | 'bug'): void
   (e: 'open-todo'): void
 }>()
 
 function onSelectWorkspace() {
   emit('select', 'workspace')
+}
+function onSelectBug() {
+  emit('select', 'bug')
 }
 function onSelectSettings() {
   emit('select', 'settings')
@@ -20,11 +23,15 @@ function onOpenTodo() {
 
 <template>
   <el-aside width="64px" class="nav-col">
-    <!-- 顶部：工作区 + 待办提醒 -->
+    <!-- 顶部：工作区 + Bug 管理 + 待办提醒 -->
     <el-menu class="nav-menu" :collapse="true" :default-active="activeKey">
       <el-menu-item index="workspace" @click="onSelectWorkspace">
         <el-icon><Document /></el-icon>
         <template #title>工作区</template>
+      </el-menu-item>
+      <el-menu-item index="bug" @click="onSelectBug">
+        <el-icon><WarningFilled /></el-icon>
+        <template #title>Bug 管理</template>
       </el-menu-item>
       <el-menu-item index="todo" @click="onOpenTodo">
         <el-icon><Bell /></el-icon>

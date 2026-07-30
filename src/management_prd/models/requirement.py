@@ -18,25 +18,28 @@ class RequirementStatus(StrEnum):
     UI_DONE_WAITING_BACKEND = "ui_done_waiting_backend"
     DONE = "done"
     DEFERRED = "deferred"
-    BUG = "bug"
 
 
 # 状态中文标签：导出尾标 / 前端标签 / 导入解析均使用此映射。
+#
+# 注：原 ``BUG = "bug"`` 已移除 -- bug 改由独立的 ``bugs`` 表管理（见
+# :mod:`management_prd.models.bug`）。历史 ``status='bug'`` 的需求行在 schema v3
+# 迁移中一次性搬入 ``bugs`` 表并从 ``requirements`` 删除（迁移用原始字符串 ``'bug'``
+# 匹配，不依赖枚举值）。
 STATUS_LABEL: dict[RequirementStatus, str] = {
     RequirementStatus.TODO: "to do",
     RequirementStatus.UI_DONE_WAITING_BACKEND: "等待对接",
     RequirementStatus.DONE: "完成",
     RequirementStatus.DEFERRED: "暂缓",
-    RequirementStatus.BUG: "bug",
 }
 
 # 导入解析时的「状态段」关键字 -> 状态。键为模块标题归一化（strip + 小写）。
+# 注：``"bug"`` 关键字已移除，旧文本中 ``bug`` 段标题退化为普通模块名。
 STATUS_SECTION_KEYWORDS: dict[str, RequirementStatus] = {
     "to do": RequirementStatus.TODO,
     "todo": RequirementStatus.TODO,
     "待办": RequirementStatus.TODO,
     "暂缓": RequirementStatus.DEFERRED,
-    "bug": RequirementStatus.BUG,
 }
 
 # 反向映射：尾标文本 -> 状态。

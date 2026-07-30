@@ -1,12 +1,15 @@
-/** 状态标签映射（与 Python STATUS_LABEL 共享语义）。 */
-export type RequirementStatus = 'todo' | 'ui_done_waiting_backend' | 'done' | 'deferred' | 'bug'
+/** 状态标签映射（与 Python STATUS_LABEL 共享语义）。
+ *
+ * 注：原 'bug' 状态已移除 —— bug 改由独立的 bugs 表管理（见 ./bug.ts）。
+ * 历史 status='bug' 的需求行在后端 schema v3 迁移中一次性搬入 bugs 表并删除。
+ */
+export type RequirementStatus = 'todo' | 'ui_done_waiting_backend' | 'done' | 'deferred'
 
 export const STATUS_LABEL: Record<RequirementStatus, string> = {
   todo: 'to do',
   ui_done_waiting_backend: '等待对接',
   done: '完成',
   deferred: '暂缓',
-  bug: 'bug',
 }
 
 export const STATUS_TAG_TYPE: Record<RequirementStatus, string> = {
@@ -14,7 +17,6 @@ export const STATUS_TAG_TYPE: Record<RequirementStatus, string> = {
   ui_done_waiting_backend: 'warning',
   done: 'success',
   deferred: 'danger',
-  bug: 'danger',
 }
 
 /** 需求迭代记录（单 date + feature）。 */
