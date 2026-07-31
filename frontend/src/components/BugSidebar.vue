@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Edit } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus } from '@element-plus/icons-vue'
 
 import { useProjectsStore } from '@/stores/projects'
 import { useBugsStore } from '@/stores/bugs'
@@ -20,12 +20,18 @@ function onViewModeChange(val: string | number | boolean) {
   viewMode.value = val as ViewMode
 }
 
-// 重命名 / 删除项目：bug 视图允许编辑项目元信息，但不允许新建项目
-// （与 ProjectSidebar 复用同一份 ProjectDialog 与 projectsStore API）
+// 新建 / 重命名 / 删除项目：bug 视图与工作区共享同一份 projects 表与
+// useProjectsStore.summaries，任一侧新建都会响应式同步到另一侧列表
 const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'rename'>('rename')
 const dialogInitialName = ref('')
 const renameId = ref('')
+
+function openCreate() {
+  dialogMode.value = 'create'
+  dialogInitialName.value = ''
+  dialogVisible.value = true
+}
 
 async function onDelete(id: string) {
   const summary = summaries.value.find((s) => s.id === id)
@@ -74,6 +80,13 @@ function selectProject(id: string) {
       />
     </div>
 
+    <div class="actions">
+      <el-button plain size="small" class="action-btn" @click="openCreate">
+        <el-icon class="action-icon"><Plus /></el-icon>
+        <span>新建项目</span>
+      </el-button>
+    </div>
+
     <div class="list">
       <div
         v-for="p in summaries"
@@ -93,7 +106,7 @@ function selectProject(id: string) {
           <span class="date-tag">最新 {{ formatDate(p.list_date) }}</span>
         </div>
       </div>
-      <div v-if="summaries.length === 0" class="empty">暂无项目，请在工作区新建</div>
+      <div v-if="summaries.length === 0" class="empty">暂无项目，请新建</div>
     </div>
 
     <ProjectDialog
@@ -121,6 +134,23 @@ function selectProject(id: string) {
 .title {
   font-weight: 600;
   font-size: 15px;
+  flex-shrink: 0;
+}
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 16px 12px;
+}
+.action-btn {
+  width: 100%;
+  /* 左对齐，图标与文字起点统一（覆盖 el-button 默认居中） */
+  justify-content: flex-start;
+  gap: 6px;
+}
+.action-icon {
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
 .list {
