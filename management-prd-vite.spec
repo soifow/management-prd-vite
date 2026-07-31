@@ -50,6 +50,8 @@ exe = EXE(
     a.datas,
     [],
     name="management-prd-vite",
+    # Windows EXE 图标：由 scripts/build_ico.py 从 app-icon.png 生成。
+    icon="app-icon.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
