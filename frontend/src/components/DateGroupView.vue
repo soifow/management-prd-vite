@@ -24,7 +24,7 @@ watch(
 )
 
 function onRowClick(item: RequirementItem) {
-  store.openFeature(item.module, item.feature)
+  store.openFeature(item.feature)
 }
 
 async function onStatusChange(item: RequirementItem, status: RequirementStatus) {

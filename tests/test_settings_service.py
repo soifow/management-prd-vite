@@ -20,9 +20,10 @@ def test_load_returns_default_when_missing(bootstrap: BootstrapService) -> None:
     settings = svc.load()
     assert settings.default_view_mode == "date"
     assert settings.project_list_date_mode == "latest_any"
-    assert settings.settings_order == ["storage", "display", "reminder"]
+    assert settings.settings_order == ["storage", "display", "reminder", "subitem"]
     assert settings.reminder_threshold_days == 7
     assert settings.show_no_deadline_in_todo is True
+    assert settings.show_subitem_progress_in_tree is False
 
 
 def test_save_and_load_roundtrip(bootstrap: BootstrapService) -> None:
@@ -55,9 +56,10 @@ def test_get_settings_dict(bootstrap: BootstrapService) -> None:
     assert d == {
         "default_view_mode": "date",
         "project_list_date_mode": "latest_any",
-        "settings_order": ["storage", "display", "reminder"],
+        "settings_order": ["storage", "display", "reminder", "subitem"],
         "reminder_threshold_days": 7,
         "show_no_deadline_in_todo": True,
+        "show_subitem_progress_in_tree": False,
     }
 
 

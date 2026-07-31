@@ -5,13 +5,15 @@
 import type { ApiErrorEnvelope } from './api'
 import type { BugItem, BugLinkInfo, BugStatus, CreateBugInput, UpdateBugInput } from './bug'
 import type { ParsedRequirement, PickParseResult } from './import'
+import type { Module } from './module'
 import type { Project, ProjectSummary } from './project'
 import type { RequirementItem, RequirementStatus } from './requirement'
 import type { AppSettings } from './settings'
+import type { CreateSubitemInput, RequirementSubitem, UpdateSubitemInput } from './subitem'
 import type { TodoReminder } from './todo'
 
 export interface CreateRequirementInput {
-  module: string
+  module_names: string[]
   feature: string
   content: string
   status: RequirementStatus
@@ -20,7 +22,7 @@ export interface CreateRequirementInput {
 }
 
 export interface UpdateRequirementInput {
-  module?: string
+  module_names?: string[]
   feature?: string
   content?: string
   status?: RequirementStatus
@@ -37,11 +39,12 @@ export interface PyWebViewApi {
   create_project(name: string): Promise<ProjectSummary | ApiErrorEnvelope>
   rename_project(project_id: string, name: string): Promise<ProjectSummary | ApiErrorEnvelope>
   delete_project(project_id: string): Promise<boolean | ApiErrorEnvelope>
-  list_modules(project_id: string): Promise<string[] | ApiErrorEnvelope>
-  list_features(project_id: string, module: string): Promise<string[] | ApiErrorEnvelope>
+  list_modules(project_id: string): Promise<Module[] | ApiErrorEnvelope>
+  create_module(project_id: string, name: string): Promise<Module | ApiErrorEnvelope>
+  delete_module(module_id: string): Promise<boolean | ApiErrorEnvelope>
+  list_features(project_id: string): Promise<string[] | ApiErrorEnvelope>
   list_iterations(
     project_id: string,
-    module: string,
     feature: string,
   ): Promise<RequirementItem[] | ApiErrorEnvelope>
 
@@ -60,6 +63,22 @@ export interface PyWebViewApi {
   ): Promise<RequirementItem | ApiErrorEnvelope>
   delete_requirement(item_id: string): Promise<boolean | ApiErrorEnvelope>
   get_todo_reminders(): Promise<TodoReminder[] | ApiErrorEnvelope>
+
+  // ── 迭代级子需求 ──
+  list_subitems(iteration_id: string): Promise<RequirementSubitem[] | ApiErrorEnvelope>
+  create_subitem(
+    iteration_id: string,
+    input: CreateSubitemInput,
+  ): Promise<RequirementSubitem | ApiErrorEnvelope>
+  update_subitem(
+    subitem_id: string,
+    patch: UpdateSubitemInput,
+  ): Promise<RequirementSubitem | ApiErrorEnvelope>
+  set_subitem_status(
+    subitem_id: string,
+    status: RequirementStatus,
+  ): Promise<RequirementSubitem | ApiErrorEnvelope>
+  delete_subitem(subitem_id: string): Promise<boolean | ApiErrorEnvelope>
 
   // ── Bug ──
   list_bugs(project_id: string): Promise<BugItem[] | ApiErrorEnvelope>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { MdEditor } from 'md-editor-v3'
@@ -24,7 +24,8 @@ const bugsStore = useBugsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
 const { modules } = storeToRefs(bugsStore)
 
-const moduleInput = ref('')
+const moduleOptions = computed(() => modules.value.map((m) => m.name))
+const moduleNames = ref<string[]>([])
 const contentInput = ref('')
 const levelInput = ref<BugLevel>('P3')
 const statusInput = ref<BugStatus>('open')
@@ -41,24 +42,24 @@ const levelOptions: { value: BugLevel; label: string }[] = (
 ).map((k) => ({ value: k, label: LEVEL_LABEL[k] }))
 
 async function refreshFeatures() {
-  if (!activeProjectId.value || !moduleInput.value) {
+  if (!activeProjectId.value) {
     features.value = []
     return
   }
-  features.value = await bugsStore.listFeaturesFor(moduleInput.value)
+  features.value = await bugsStore.listFeaturesFor()
 }
 
 async function refreshIterations(feature: string) {
-  if (!activeProjectId.value || !moduleInput.value || !feature) {
+  if (!activeProjectId.value || !feature) {
     iterations.value = []
     return
   }
-  const iters = await bugsStore.listIterationsFor(moduleInput.value, feature)
+  const iters = await bugsStore.listIterationsFor(feature)
   iterations.value = iters.map((i) => ({ id: i.id, date: i.date, content: i.content }))
 }
 
 function reset() {
-  moduleInput.value = modules.value[0] ?? ''
+  moduleNames.value = modules.value.length > 0 ? [modules.value[0].name] : []
   contentInput.value = ''
   levelInput.value = 'P3'
   statusInput.value = 'open'
@@ -79,10 +80,6 @@ watch(
   },
 )
 
-watch(moduleInput, () => {
-  if (props.modelValue) refreshFeatures()
-})
-
 watch(linkedFeature, (f) => {
   if (f) void refreshIterations(f)
 })
@@ -97,8 +94,8 @@ async function onSubmit() {
     ElMessage.warning('未选择项目')
     return
   }
-  if (!moduleInput.value) {
-    ElMessage.warning('请选择模块')
+  if (moduleNames.value.length === 0) {
+    ElMessage.warning('至少选择一个模块')
     return
   }
   if (!contentInput.value.trim()) {
@@ -111,7 +108,7 @@ async function onSubmit() {
   }
   try {
     await bugsStore.createBugItem({
-      module: moduleInput.value,
+      module_names: moduleNames.value,
       content: contentInput.value,
       level: levelInput.value,
       status: statusInput.value,
@@ -138,8 +135,16 @@ async function onSubmit() {
   >
     <el-form label-width="90px">
       <el-form-item label="模块" required>
-        <el-select v-model="moduleInput" placeholder="选择模块（来源：项目需求的模块）" style="width: 100%">
-          <el-option v-for="m in modules" :key="m" :label="m" :value="m" />
+        <el-select
+          v-model="moduleNames"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          placeholder="选择或输入模块（可多选）"
+          style="width: 100%"
+        >
+          <el-option v-for="m in moduleOptions" :key="m" :label="m" :value="m" />
         </el-select>
       </el-form-item>
 

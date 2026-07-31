@@ -25,4 +25,6 @@ export interface AppSettings {
   reminder_threshold_days: number
   /** 无完成时限的未完成需求是否常驻待办列表 */
   show_no_deadline_in_todo: boolean
+  /** 树形功能节点是否显示子需求进度 (done/total)；关则仅功能详情页显示 */
+  show_subitem_progress_in_tree: boolean
 }

@@ -21,6 +21,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const reminderThresholdDays = ref(7)
   // 待办提醒：无时限需求是否常驻待办列表
   const showNoDeadlineInTodo = ref(true)
+  // 树形功能节点是否显示子需求进度 (done/total)
+  const showSubitemProgressInTree = ref(false)
 
   async function loadStorageInfo() {
     loading.value = true
@@ -42,6 +44,7 @@ export const useSettingsStore = defineStore('settings', () => {
         : ['storage', 'display']
     reminderThresholdDays.value = settings.reminder_threshold_days
     showNoDeadlineInTodo.value = settings.show_no_deadline_in_todo
+    showSubitemProgressInTree.value = settings.show_subitem_progress_in_tree
   }
 
   /** 修改默认聚合方式并落盘。 */
@@ -76,6 +79,12 @@ export const useSettingsStore = defineStore('settings', () => {
     showNoDeadlineInTodo.value = settings.show_no_deadline_in_todo
   }
 
+  /** 修改「树形显示子需求进度」开关并落盘。 */
+  async function saveSubitemProgressInTree(show: boolean) {
+    const settings = await updateSettings({ show_subitem_progress_in_tree: show })
+    showSubitemProgressInTree.value = settings.show_subitem_progress_in_tree
+  }
+
   /** 弹文件夹选择框，返回所选路径或 null（取消）。 */
   async function pickFolder(): Promise<string | null> {
     return await pickStorageDir()
@@ -108,12 +117,14 @@ export const useSettingsStore = defineStore('settings', () => {
     settingsOrder,
     reminderThresholdDays,
     showNoDeadlineInTodo,
+    showSubitemProgressInTree,
     loadStorageInfo,
     loadSettings,
     saveDefaultViewMode,
     saveProjectListDateMode,
     saveSettingsOrder,
     saveReminderSettings,
+    saveSubitemProgressInTree,
     pickFolder,
     migrate,
   }

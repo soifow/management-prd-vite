@@ -24,7 +24,7 @@ export function useRequirementFilter(
       if (
         !item.content.toLowerCase().includes(kw) &&
         !item.feature.toLowerCase().includes(kw) &&
-        !item.module.toLowerCase().includes(kw)
+        !item.modules.some((m) => m.toLowerCase().includes(kw))
       ) {
         return false
       }

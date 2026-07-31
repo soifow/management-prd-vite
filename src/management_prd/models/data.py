@@ -44,9 +44,12 @@ class ParsedRequirement(BaseModel):
     """解析得到的一条需求候选（导入预览 / 应用时使用）。
 
     每个 ``(date, module, content)`` 产出一条；``feature`` 默认取 ``content``。
+    ``module`` 保留以兼容导入解析（导入文本仍是单模块）；``module_names`` 由
+    :meth:`ProjectService.apply_import` 内部派生 ``[module]``。
     """
 
     module: str = ""
+    module_names: list[str] = []  # apply_import 时由 module 派生
     feature: str = ""
     content: str
     status: RequirementStatus = RequirementStatus.DONE
@@ -64,9 +67,9 @@ class ParsedImport(BaseModel):
 
 
 class CreateRequirementInput(BaseModel):
-    """新建需求入参（单日期 + 功能名）。"""
+    """新建需求入参（单日期 + 功能名 + 多模块）。"""
 
-    module: str = ""
+    module_names: list[str]  # 多模块（≥1，前端校验）
     feature: str = ""
     content: str
     status: RequirementStatus = RequirementStatus.TODO
@@ -77,7 +80,8 @@ class CreateRequirementInput(BaseModel):
 class UpdateRequirementInput(BaseModel):
     """更新需求入参（部分字段）。
 
-    ``completion_deadline`` 与 ``clear_completion_deadline`` 配合实现三态：
+    ``module_names`` 为 None 表示跳过；提供则整体替换关联。``completion_deadline``
+    与 ``clear_completion_deadline`` 配合实现三态：
     - completion_deadline=None, clear=False → 不更新（跳过）
     - completion_deadline=<date> → 设为该日期
     - clear_completion_deadline=True → 置 NULL（优先级高于 completion_deadline）
@@ -85,7 +89,7 @@ class UpdateRequirementInput(BaseModel):
     此外，当 ``status == deferred`` 时由服务层自动清空时限（无论前端是否传入）。
     """
 
-    module: str | None = None
+    module_names: list[str] | None = None  # None=跳过；提供则整体替换关联
     feature: str | None = None
     content: str | None = None
     status: RequirementStatus | None = None

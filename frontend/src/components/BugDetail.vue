@@ -23,7 +23,7 @@ const { currentBug, linkedInfo, modules } = storeToRefs(bugsStore)
 const { activeProjectId } = storeToRefs(projectsStore)
 
 // 编辑缓冲（避免直接改 store 引用）
-const bufferModule = ref('')
+const bufferModuleNames = ref<string[]>([])
 const bufferLevel = ref<BugLevel>('P3')
 const bufferStatus = ref<BugStatus>('open')
 const bufferDate = ref('')
@@ -38,12 +38,10 @@ const levelOptions: { value: BugLevel; label: string }[] = (
   Object.keys(LEVEL_LABEL) as BugLevel[]
 ).map((k) => ({ value: k, label: LEVEL_LABEL[k] }))
 
-// 模块下拉选项：项目已有模块 + 当前 bug 的模块（兜底，防止该模块在需求中被删后无法显示）
-const moduleOptions = computed(() => {
-  const opts = new Set<string>(modules.value)
-  if (bufferModule.value) opts.add(bufferModule.value)
-  return Array.from(opts).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
-})
+// 模块下拉选项：项目已有模块（modules 一等实体表）
+const moduleOptions = computed(() =>
+  modules.value.map((m) => m.name).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
+)
 
 // 关联是否处于「编辑中」：缓冲已偏离已保存的关联（选中了新迭代 / 发起了清除）。
 // 编辑中时隐藏已保存关联卡片（active/stale），改为显示两级下拉——否则用户刚在下拉里
@@ -54,21 +52,21 @@ const linkDirty = computed(
     bufferLinkedId.value !== currentBug.value?.linked_iteration_id,
 )
 
-// 关联功能下拉：当前选中模块下需求的 feature 列表
+// 关联功能下拉：项目级 feature 列表（v4 去 module 入参）
 async function refreshFeatures() {
-  if (!activeProjectId.value || !bufferModule.value) {
+  if (!activeProjectId.value) {
     features.value = []
     return
   }
-  features.value = await bugsStore.listFeaturesFor(bufferModule.value)
+  features.value = await bugsStore.listFeaturesFor()
 }
 
 async function refreshIterations(feature: string) {
-  if (!activeProjectId.value || !bufferModule.value || !feature) {
+  if (!activeProjectId.value || !feature) {
     iterations.value = []
     return
   }
-  const iters = await bugsStore.listIterationsFor(bufferModule.value, feature)
+  const iters = await bugsStore.listIterationsFor(feature)
   iterations.value = iters.map((i) => ({
     id: i.id,
     date: i.date,
@@ -84,7 +82,7 @@ watch(linkedFeature, (f) => {
 
 function resetBuffer(b: BugItem | null) {
   if (!b) return
-  bufferModule.value = b.module
+  bufferModuleNames.value = [...b.modules]
   bufferLevel.value = b.level
   bufferStatus.value = b.status
   bufferDate.value = b.date
@@ -96,10 +94,7 @@ function resetBuffer(b: BugItem | null) {
   iterations.value = []
 }
 
-// 切换 bug 时回填缓冲 + 解析关联 + 强制加载功能下拉
-// 必须显式触发 refreshFeatures：watch(currentBug, immediate) 的回调是同步执行的，
-// 此时下方 watch(bufferModule) 尚未注册，resetBuffer 里对 bufferModule 的赋值无人监听，
-// 导致「未关联 bug」首开时 features 永远为空（对照 BugEditDialog 的「打开即加载」范式）。
+// 切换 bug 时回填缓冲 + 解析关联 + 强制加载功能下拉（对照 BugEditDialog「打开即加载」范式）
 watch(currentBug, async (b) => {
   if (!b) return
   resetBuffer(b)
@@ -116,20 +111,20 @@ watch(linkedInfo, (info) => {
   }
 })
 
-watch(bufferModule, () => {
-  void refreshFeatures()
-})
-
 async function onSave() {
   const b = currentBug.value
   if (!b) return
+  if (bufferModuleNames.value.length === 0) {
+    ElMessage.warning('至少选择一个模块')
+    return
+  }
   if (!bufferContent.value.trim()) {
     ElMessage.warning('bug 内容不能为空')
     return
   }
   try {
     await bugsStore.updateBugItem(b.id, {
-      module: bufferModule.value,
+      module_names: bufferModuleNames.value,
       content: bufferContent.value,
       level: bufferLevel.value,
       status: bufferStatus.value,
@@ -207,7 +202,17 @@ function onIterationChange(id: string | null) {
             size="small"
             style="width: 150px"
           />
-          <el-select v-model="bufferModule" size="small" placeholder="所属模块" style="width: 160px">
+          <el-select
+            v-model="bufferModuleNames"
+            size="small"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            collapse-tags
+            placeholder="所属模块"
+            style="width: 220px"
+          >
             <el-option v-for="m in moduleOptions" :key="m" :label="m" :value="m" />
           </el-select>
           <el-select v-model="bufferLevel" size="small" style="width: 160px">

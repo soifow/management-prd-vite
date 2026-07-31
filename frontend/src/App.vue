@@ -88,7 +88,7 @@ async function onJumpToRequirement(link: BugLinkInfo) {
   try {
     projectsStore.select(link.project_id)
     await requirementsStore.loadProject(link.project_id)
-    await requirementsStore.openFeature(link.module, link.feature)
+    await requirementsStore.openFeature(link.feature)
     requirementsStore.selectIteration(link.item_id)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '跳转失败')
@@ -118,7 +118,7 @@ async function onJumpToItem(item: TodoReminder) {
   try {
     projectsStore.select(item.project_id)
     await requirementsStore.loadProject(item.project_id)
-    await requirementsStore.openFeature(item.module, item.feature)
+    await requirementsStore.openFeature(item.feature)
     requirementsStore.selectIteration(item.item_id)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '跳转失败')

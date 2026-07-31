@@ -1,4 +1,4 @@
-"""导出器测试（v3：每条 RequirementItem 一段）。"""
+"""导出器测试（v4：多模块取首个作为展示模块）。"""
 
 from __future__ import annotations
 
@@ -24,16 +24,19 @@ def _make_item(
     now: datetime | None = None,
 ) -> RequirementItem:
     now = now or datetime(2026, 7, 27, 12, 0, 0)
+    # v4：RequirementItem 用 modules 列表，导出器取首个作为展示模块；
+    # 空 module 用 "（未分组）" 占位，保留导出文本可读性。
+    modules = [module] if module else ["（未分组）"]
     return RequirementItem(
         id=f"i-{content}-{d}",
         project_id="p1",
-        module=module,
         feature=feature,
         content=content,
         status=status,
         date=d,
         created_at=now,
         updated_at=now,
+        modules=modules,
     )
 
 

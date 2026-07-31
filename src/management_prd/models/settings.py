@@ -40,7 +40,7 @@ class AppSettings(BaseModel):
     )
 
     settings_order: list[str] = Field(
-        default_factory=lambda: ["storage", "display", "reminder"],
+        default_factory=lambda: ["storage", "display", "reminder", "subitem"],
         description="设置分组 tab 的显示顺序（分组 key 数组）",
     )
 
@@ -53,4 +53,9 @@ class AppSettings(BaseModel):
     show_no_deadline_in_todo: bool = Field(
         default=True,
         description="无完成时限的未完成需求是否常驻待办列表",
+    )
+
+    show_subitem_progress_in_tree: bool = Field(
+        default=False,
+        description="树形功能节点是否显示子需求进度 (done/total)；关则仅功能详情页显示",
     )

@@ -23,7 +23,10 @@ const requirementsStore = useRequirementsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
 const { modules, selectedFeature } = storeToRefs(requirementsStore)
 
-const moduleInput = ref('')
+// 模块名候选（来自 modules 一等实体表）
+const moduleOptions = computed(() => modules.value.map((m) => m.name))
+
+const moduleNames = ref<string[]>([])
 const featureInput = ref('')
 const contentInput = ref('')
 const statusInput = ref<RequirementStatus>('todo')
@@ -42,7 +45,7 @@ async function refreshFeatureOptions() {
     featureOptions.value = []
     return
   }
-  featureOptions.value = await requirementsStore.listFeatures(activeProjectId.value, moduleInput.value)
+  featureOptions.value = await requirementsStore.listFeatures(activeProjectId.value)
 }
 
 watch(
@@ -50,15 +53,15 @@ watch(
   async (visible) => {
     if (!visible) return
     if (props.mode === 'edit' && editingItem.value) {
-      moduleInput.value = editingItem.value.module
+      moduleNames.value = [...editingItem.value.modules]
       featureInput.value = editingItem.value.feature
       contentInput.value = editingItem.value.content
       statusInput.value = editingItem.value.status
       dateInput.value = editingItem.value.date
       deadlineInput.value = editingItem.value.completion_deadline
     } else {
-      // 新建：预填当前功能的 module/feature
-      moduleInput.value = selectedFeature.value?.module ?? ''
+      // 新建：预填当前功能的 feature，模块不预填（用户明确选择）
+      moduleNames.value = []
       featureInput.value = selectedFeature.value?.feature ?? ''
       contentInput.value = ''
       statusInput.value = 'todo'
@@ -69,31 +72,10 @@ watch(
   },
 )
 
-watch(moduleInput, () => {
-  if (props.modelValue) refreshFeatureOptions()
-})
-
 // 暂缓状态联动清空时限（前端即时反馈；后端亦强制）
 watch(statusInput, (s) => {
   if (s === 'deferred') deadlineInput.value = null
 })
-
-// el-autocomplete 建议回调：v-model 即输入框值，失焦天然保留，解决 el-select allow-create 失焦丢值
-function querySearchModule(query: string, cb: (results: { value: string }[]) => void) {
-  const q = query.trim().toLowerCase()
-  const list = modules.value
-    .filter((m) => m.toLowerCase().includes(q))
-    .map((m) => ({ value: m }))
-  cb(list)
-}
-
-function querySearchFeature(query: string, cb: (results: { value: string }[]) => void) {
-  const q = query.trim().toLowerCase()
-  const list = featureOptions.value
-    .filter((f) => f.toLowerCase().includes(q))
-    .map((f) => ({ value: f }))
-  cb(list)
-}
 
 const statusOptions: RequirementStatus[] = [
   'todo',
@@ -105,6 +87,10 @@ const statusOptions: RequirementStatus[] = [
 async function onSubmit() {
   if (!activeProjectId.value) {
     ElMessage.warning('未选择项目')
+    return
+  }
+  if (moduleNames.value.length === 0) {
+    ElMessage.warning('至少选择一个模块')
     return
   }
   if (!contentInput.value.trim()) {
@@ -119,7 +105,7 @@ async function onSubmit() {
   try {
     if (props.mode === 'create') {
       await requirementsStore.createIteration({
-        module: moduleInput.value,
+        module_names: moduleNames.value,
         feature: featureInput.value || contentInput.value.trim(),
         content: contentInput.value,
         status: statusInput.value,
@@ -129,7 +115,7 @@ async function onSubmit() {
       ElMessage.success('已新建迭代')
     } else if (editingItem.value) {
       await requirementsStore.updateIteration(editingItem.value.id, {
-        module: moduleInput.value,
+        module_names: moduleNames.value,
         feature: featureInput.value,
         content: contentInput.value,
         status: statusInput.value,
@@ -157,25 +143,31 @@ async function onSubmit() {
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
   >
     <el-form label-width="80px">
-      <el-form-item label="模块">
-        <el-autocomplete
-          v-model="moduleInput"
-          :fetch-suggestions="querySearchModule"
-          clearable
-          :trigger-on-focus="true"
-          placeholder="选择或输入模块（留空表示未分组）"
+      <el-form-item label="模块" required>
+        <el-select
+          v-model="moduleNames"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          placeholder="选择或输入模块（可多选）"
           style="width: 100%"
-        />
+        >
+          <el-option v-for="m in moduleOptions" :key="m" :label="m" :value="m" />
+        </el-select>
       </el-form-item>
       <el-form-item label="功能名">
-        <el-autocomplete
+        <el-select
           v-model="featureInput"
-          :fetch-suggestions="querySearchFeature"
+          filterable
+          allow-create
+          default-first-option
           clearable
-          :trigger-on-focus="true"
           placeholder="选择或输入功能名（同名功能聚合为迭代）"
           style="width: 100%"
-        />
+        >
+          <el-option v-for="f in featureOptions" :key="f" :label="f" :value="f" />
+        </el-select>
       </el-form-item>
       <el-form-item label="状态">
         <el-select v-model="statusInput" style="width: 100%">

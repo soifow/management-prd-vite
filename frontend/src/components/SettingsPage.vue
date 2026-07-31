@@ -20,6 +20,7 @@ const GROUPS = [
   { key: 'storage', label: '存储位置' },
   { key: 'display', label: '显示设置' },
   { key: 'reminder', label: '提醒设置' },
+  { key: 'subitem', label: '子需求进度' },
 ] as const
 
 // 项目列表「最新」日期口径下拉选项：value/label/desc，desc 随选中项联动显示
@@ -50,6 +51,8 @@ const dragOverKey = ref<string | null>(null)
 // 提醒设置草稿（保存时一并落盘）
 const draftThreshold = ref(settingsStore.reminderThresholdDays)
 const draftShowNoDeadline = ref(settingsStore.showNoDeadlineInTodo)
+// 子需求进度草稿
+const draftShowSubitemProgress = ref(settingsStore.showSubitemProgressInTree)
 
 // 项目列表日期口径草稿（保存时一并落盘）
 const draftProjectListDateMode = ref<ProjectListDateMode>(settingsStore.projectListDateMode)
@@ -189,6 +192,7 @@ async function onSave() {
     await settingsStore.saveDefaultViewMode(defaultViewMode.value as ViewMode)
     await settingsStore.saveProjectListDateMode(draftProjectListDateMode.value)
     await settingsStore.saveReminderSettings(draftThreshold.value, draftShowNoDeadline.value)
+    await settingsStore.saveSubitemProgressInTree(draftShowSubitemProgress.value)
     emit('save')
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '保存设置失败')
@@ -314,6 +318,20 @@ async function onSave() {
               <el-form-item label="无时限需求">
                 <el-switch v-model="draftShowNoDeadline" />
                 <span class="field-hint">开启时，未设置完成时限的未完成需求常驻待办列表</span>
+              </el-form-item>
+            </el-form>
+          </template>
+
+          <!-- 子需求进度 -->
+          <template v-else-if="g.key === 'subitem'">
+            <h3 class="section-title">子需求进度</h3>
+            <p class="section-desc">
+              控制树形功能节点是否显示子需求完成进度（done/total）。关闭时仅在功能详情页显示子需求进度信息。
+            </p>
+            <el-form label-position="top">
+              <el-form-item label="树形显示子需求进度">
+                <el-switch v-model="draftShowSubitemProgress" />
+                <span class="field-hint">开启时，树形功能节点追加 (完成数/总数) 进度显示</span>
               </el-form-item>
             </el-form>
           </template>

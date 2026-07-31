@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { useBugsStore } from '@/stores/bugs'
-import { BUG_STATUS_LABEL, BUG_STATUS_TAG_TYPE, LEVEL_LABEL, LEVEL_TAG_TYPE } from '@/types/bug'
+import { BUG_STATUS_LABEL, LEVEL_LABEL, LEVEL_TAG_TYPE } from '@/types/bug'
 import type { BugItem, BugStatus } from '@/types'
 import { formatDate, sortBugs } from '@/utils'
 
@@ -72,7 +72,7 @@ async function onStatusChange(b: BugItem, status: BugStatus) {
               <el-tag :type="LEVEL_TAG_TYPE[b.level] as never" size="small" effect="dark">
                 {{ LEVEL_LABEL[b.level] }}
               </el-tag>
-              <span class="bug-module">{{ b.module }}</span>
+              <span class="bug-module">{{ b.modules.join(' / ') || '（未分组）' }}</span>
             </div>
             <span class="bug-content">{{ b.content || '（空）' }}</span>
           </div>

@@ -18,10 +18,17 @@ interface ModuleGroup {
 const grouped = computed<ModuleGroup[]>(() => {
   const map = new Map<string, BugItem[]>()
   for (const b of filteredBugs.value) {
-    const key = b.module || '（未分组）'
-    const list = map.get(key)
-    if (list) list.push(b)
-    else map.set(key, [b])
+    // 多模块展开：一条多模块 bug 在每个关联模块下各出现一份（底层同一记录）
+    const mods = b.modules.length > 0 ? b.modules : ['（未分组）']
+    for (const m of mods) {
+      const key = m
+      const list = map.get(key)
+      if (list) {
+        if (!list.some((x) => x.id === b.id)) list.push(b)
+      } else {
+        map.set(key, [b])
+      }
+    }
   }
   return Array.from(map.entries())
     .map(([module, bugs]) => ({ module, bugs: sortBugs(bugs) }))

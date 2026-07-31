@@ -90,7 +90,7 @@ async function onExport() {
     </el-select>
     <el-input
       v-model="filters.keyword"
-      placeholder="关键字（模块/功能/内容）"
+      placeholder="关键字（功能/内容/模块）"
       clearable
       style="width: 220px"
     />

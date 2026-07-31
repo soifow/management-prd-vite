@@ -25,28 +25,41 @@ const UNGROUPED = '（未分组）'
  *   只要有一条未完成，该模块靠前。同组（同为已完成/同为未完成）按模块名排序。
  */
 export function groupByDate(items: RequirementItem[]): DateGroup[] {
+  // 多模块展开：一条多模块需求在每个关联模块下各出现一份（与树形口径一致）
+  const expanded: { module: string; item: RequirementItem }[] = []
+  for (const it of items) {
+    const mods = it.modules.length > 0 ? it.modules : ['']
+    for (const m of mods) expanded.push({ module: m, item: it })
+  }
+
   // 先排序：module -> feature -> date（同模块相邻；同模块内按 feature 聚拢）
-  const sorted = [...items].sort((a, b) => {
+  const sorted = [...expanded].sort((a, b) => {
     if (a.module !== b.module) return a.module.localeCompare(b.module)
-    if (a.feature !== b.feature) return a.feature.localeCompare(b.feature)
-    return a.date.localeCompare(b.date)
+    if (a.item.feature !== b.item.feature) return a.item.feature.localeCompare(b.item.feature)
+    return a.item.date.localeCompare(b.item.date)
   })
 
   // 按 date 分组；遍历时按排序后的顺序，但分组结果需 date 倒序
   const map = new Map<string, RequirementItem[]>()
-  for (const it of sorted) {
-    if (!map.has(it.date)) map.set(it.date, [])
-    map.get(it.date)!.push(it)
+  for (const e of sorted) {
+    if (!map.has(e.item.date)) map.set(e.item.date, [])
+    map.get(e.item.date)!.push(e.item)
   }
 
   const groups: DateGroup[] = []
   for (const [date, dayItems] of map.entries()) {
-    // 按模块分桶（同模块聚成一段；dayItems 已按 module 排好，桶内保留 feature->date 顺序）
+    // 按模块分桶（同模块聚成一段）。dayItems 已按 module 排好，但需重新按展示模块分桶
     const segMap = new Map<string, RequirementItem[]>()
+    // 用 sorted 的 module 映射（保持模块展开后的归属）
+    const itemToModule = new Map<string, string>()
+    for (const e of sorted) {
+      if (e.item.date === date) itemToModule.set(e.item.id, e.module)
+    }
     for (const it of dayItems) {
-      const label = it.module || UNGROUPED
+      const label = (itemToModule.get(it.id) ?? '') || UNGROUPED
       if (!segMap.has(label)) segMap.set(label, [])
-      segMap.get(label)!.push(it)
+      // 同一 item 可能在多个模块下，避免重复 push
+      if (!segMap.get(label)!.some((x) => x.id === it.id)) segMap.get(label)!.push(it)
     }
     // 段内：未完成在前、已完成靠后（稳定）；段间：全完成段靠后，同组按模块名
     const segments: DateSegment[] = Array.from(segMap.entries())

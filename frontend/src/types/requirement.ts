@@ -19,11 +19,10 @@ export const STATUS_TAG_TYPE: Record<RequirementStatus, string> = {
   deferred: 'danger',
 }
 
-/** 需求迭代记录（单 date + feature）。 */
+/** 需求迭代记录（单 date + feature）。modules 为非持久化字段，由后端回填。 */
 export interface RequirementItem {
   id: string
   project_id: string
-  module: string
   feature: string
   content: string
   status: RequirementStatus
@@ -31,4 +30,6 @@ export interface RequirementItem {
   completion_deadline: string | null // ISO yyyy-MM-dd or null
   created_at: string
   updated_at: string
+  /** 关联模块名列表（API 层回填，按 name 升序） */
+  modules: string[]
 }

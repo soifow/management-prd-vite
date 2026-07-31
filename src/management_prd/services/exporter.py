@@ -1,6 +1,6 @@
 """严格 ``.txt`` 需求导出器。
 
-格式（v3，每条 RequirementItem 一段）::
+格式（v4，每条 RequirementItem 一段）::
 
     {= ×40}
     YYMMDD
@@ -11,7 +11,10 @@
     YYMMDD
     ...
 
-按 ``date`` 分段；同段内按 ``module`` 分组、组内按 ``feature`` 原序编号 ``1./2./3.``。
+按 ``date`` 分段；同段内按「展示模块」分组（``item.modules[0]``，按 name 升序的首个；
+空关联归「（未分组）」）、组内按 ``feature`` 原序编号 ``1./2./3.``。
+
+已知限制：导出只保留首个模块（多模块需求导出后再导入只重建单模块关联）。
 """
 
 from __future__ import annotations
@@ -24,6 +27,9 @@ from management_prd.models.requirement import STATUS_LABEL
 
 # 分隔行：40 个 '='
 SEPARATOR_LINE = "=" * 40
+
+# 无模块关联时归入的展示模块名
+_UNGROUPED = "（未分组）"
 
 
 def format_yymmdd(d: date) -> str:
@@ -42,14 +48,21 @@ class Exporter:
         if not project.items:
             return SEPARATOR_LINE + "\n（该项目暂无需求）\n"
 
-        # 按 date -> module 分组（保留原序）
-        entries = sorted(project.items, key=lambda it: (it.date, it.module))
+        # 按 date -> 展示模块分组（保留原序）。展示模块取 modules[0]（按 name 升序的首个）。
+        entries = sorted(
+            project.items,
+            key=lambda it: (
+                it.date,
+                (it.modules[0] if it.modules else _UNGROUPED),
+            ),
+        )
 
         lines: list[str] = []
         cur_date: date | None = None
         cur_module: str | None = None
         seq = 0
         for item in entries:
+            display_module = item.modules[0] if item.modules else _UNGROUPED
             if item.date != cur_date:
                 if cur_date is not None:
                     lines.append("")
@@ -58,10 +71,9 @@ class Exporter:
                 cur_date = item.date
                 cur_module = None
                 seq = 0
-            if item.module != cur_module:
-                if item.module:
-                    lines.append(item.module)
-                cur_module = item.module
+            if display_module != cur_module:
+                lines.append(display_module)
+                cur_module = display_module
                 seq = 0
             seq += 1
             lines.append(f"{seq}. {item.content}【{STATUS_LABEL[item.status]}】")

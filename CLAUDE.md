@@ -130,3 +130,15 @@
 - **设置项 show_subitem_progress_in_tree（默认关）**：关 → 树形功能节点不显示子需求进度，仅详情页头部显示；开 → 树形节点追加 `(done/total)`，进度来自 `get_project` 回填的 `subitem_progress` 摘要。`settings_order` 加 `'subitem'`。
 - **迁移幂等性（无守卫键）**：v4 分支顺序约束——① 建 4 张新表 + 索引 → ② modules 回填（requirements.module ∪ bugs.module 去重）→ ③ requirement_modules/bug_modules 回填 → ④ 同 (feature,date) 合并 + 子需求生成（content 置功能名、list 展开）→ ⑤ requirements/bugs 重建表去 module 列（加 UNIQUE）。前三步依赖原 module 列，必须在 DROP TABLE 之前完成。靠事务回滚 + `IF NOT EXISTS` + `INSERT OR IGNORE` + 版本升 4 构成可重入。
 - **已知限制**：① 导入/导出本轮**不改动**（解析格式不变、单模块口径），待本轮功能更新后单独重设计新的导入/导出格式需求——已确认。② 子需求不参与导入导出。③ 历史无 module 的需求迁移后无关联模块，归「未分组」。④ bug 不引入 feature（功能关联走既有 `linked_iteration_id`）——已确认。
+
+### v4 迁移踩坑：DROP TABLE 级联删除 + 跨版本迁移 guard（2026-07-31）
+
+v4 迁移（`_migrate_v4`）在测试时暴露两个非显然缺陷，均已修复：
+
+- **DROP TABLE 触发 FK 级联删除（核心坑）**：`_migrate_v4` 步骤⑤重建 `requirements`/`bugs` 表（`CREATE _new` → `INSERT` → `DROP` 旧 → `RENAME`）。`requirement_modules`/`requirement_subitems` 对 `requirements(id)` 有 `ON DELETE CASCADE`。当 `PRAGMA foreign_keys=ON` 时，`DROP TABLE requirements` **会级联删除 `requirement_modules`/`requirement_subitems` 的全部行**，导致刚回填的多对多关联数据全清（症状：迁移后 `requirement_modules` 为空）。
+  - **错误尝试**：在 DROP 前后包 `PRAGMA foreign_keys = OFF/ON`——**在事务中途切换 `foreign_keys` 是 no-op**（SQLite 规定：多语句事务内切换不报错但无效果）。`PRAGMA defer_foreign_keys = ON` 也无效（CASCADE 仍立即触发）。
+  - **正确修复**：`_self_check_schema` 检测到需迁移（`version < CURRENT`）时，先 `conn.commit()` 退出当前事务 → `PRAGMA foreign_keys = OFF`（事务外，生效）→ 跑 `_run_migrations` → `conn.commit()` → `PRAGMA foreign_keys = ON`。迁移逻辑（数据备份/回填/重建）完整性由代码保证，迁移期不需要 FK 约束。
+- **跨版本迁移对全新库的 guard**：`init_db` 顶部用**最新**建表常量（v4 结构）建所有表，然后 `_self_check_schema` 从种子 `schema_version='1'` 开始跑所有迁移分支。这导致 v3 分支（建带 `module` 列的 bugs 表 + `idx_bug_module` 索引）在**全新库**上崩溃——bugs 已被 init_db 建为 v4 结构（无 module 列），索引/SELECT 引用不存在的列。同理 v1/v2 老库走到 v3 时 bugs 也是 v4 结构（init_db 预建）。
+  - **修复**：v3 分支用 `PRAGMA table_info(requirements)` 检测「requirements 是否带 module 列」——有才进 v3 主体（真老库），否则跳过（全新库无 `status='bug'` 行待迁、bugs 已就绪）。bugs 若缺 module 列则 `ALTER TABLE bugs ADD COLUMN module TEXT NOT NULL DEFAULT ''` 补上（承接迁移的 bug 行，v4 会重建去掉）。v4 分支同样 `if "module" not in req_cols: return` 早退。
+- **How to apply（新增迁移分支）**：① 任何在迁移里 `DROP TABLE`（重建）的，**必须**外层先 commit + `foreign_keys=OFF`，否则 CASCADE 清空关联表。② 任何引用「旧列」的迁移 SQL（SELECT/INDEX/INSERT 列），**必须**先用 `PRAGMA table_info` 探测该列存在再执行——因为 `init_db` 顶部把所有表建成最新结构，老库的旧表虽保留（`IF NOT EXISTS` no-op），但全新库的表是最新结构、无旧列，跨版本分支会在全新库上跑。
+

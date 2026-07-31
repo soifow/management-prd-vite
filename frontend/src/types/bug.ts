@@ -29,11 +29,10 @@ export const BUG_STATUS_TAG_TYPE: Record<BugStatus, string> = {
   fixed: 'success',
 }
 
-/** 一条 bug 记录。 */
+/** 一条 bug 记录。modules 为非持久化字段，由后端回填。 */
 export interface BugItem {
   id: string
   project_id: string
-  module: string
   content: string
   level: BugLevel
   status: BugStatus
@@ -41,11 +40,13 @@ export interface BugItem {
   date: string // ISO yyyy-MM-dd
   created_at: string
   updated_at: string
+  /** 关联模块名列表（API 层回填，按 name 升序） */
+  modules: string[]
 }
 
 /** 新建 bug 入参。 */
 export interface CreateBugInput {
-  module: string
+  module_names: string[]
   content: string
   level: BugLevel
   status: BugStatus
@@ -55,7 +56,7 @@ export interface CreateBugInput {
 
 /** 更新 bug 入参（部分字段）。 */
 export interface UpdateBugInput {
-  module?: string
+  module_names?: string[]
   content?: string
   level?: BugLevel
   status?: BugStatus

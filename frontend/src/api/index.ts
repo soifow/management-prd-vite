@@ -12,9 +12,15 @@ import type {
   UpdateBugInput,
 } from '@/types/bug'
 import type { ParsedRequirement, PickParseResult } from '@/types/import'
+import type { Module } from '@/types/module'
 import type { Project, ProjectSummary } from '@/types/project'
 import type { RequirementItem, RequirementStatus } from '@/types/requirement'
 import type { AppSettings } from '@/types/settings'
+import type {
+  CreateSubitemInput,
+  RequirementSubitem,
+  UpdateSubitemInput,
+} from '@/types/subitem'
 import type { TodoReminder } from '@/types/todo'
 
 /** 后端错误信封抛出的统一异常类型。 */
@@ -79,23 +85,27 @@ export const renameProject = (projectId: string, name: string): Promise<ProjectS
 export const deleteProject = (projectId: string): Promise<boolean> =>
   invoke(() => bridge().delete_project(projectId))
 
-export const listModules = (projectId: string): Promise<string[]> =>
+export const listModules = (projectId: string): Promise<Module[]> =>
   invoke(() => bridge().list_modules(projectId))
 
-export const listFeatures = (projectId: string, module: string): Promise<string[]> =>
-  invoke(() => bridge().list_features(projectId, module))
+export const createModule = (projectId: string, name: string): Promise<Module> =>
+  invoke(() => bridge().create_module(projectId, name))
+
+export const deleteModule = (moduleId: string): Promise<boolean> =>
+  invoke(() => bridge().delete_module(moduleId))
+
+export const listFeatures = (projectId: string): Promise<string[]> =>
+  invoke(() => bridge().list_features(projectId))
 
 export const listIterations = (
   projectId: string,
-  module: string,
   feature: string,
-): Promise<RequirementItem[]> =>
-  invoke(() => bridge().list_iterations(projectId, module, feature))
+): Promise<RequirementItem[]> => invoke(() => bridge().list_iterations(projectId, feature))
 
 // ── 需求 ────────────────────────────────────────────────────
 
 export interface CreateRequirementInput {
-  module: string
+  module_names: string[]
   feature: string
   content: string
   status: RequirementStatus
@@ -104,7 +114,7 @@ export interface CreateRequirementInput {
 }
 
 export interface UpdateRequirementInput {
-  module?: string
+  module_names?: string[]
   feature?: string
   content?: string
   status?: RequirementStatus
@@ -132,6 +142,29 @@ export const setRequirementStatus = (
 
 export const deleteRequirement = (itemId: string): Promise<boolean> =>
   invoke(() => bridge().delete_requirement(itemId))
+
+// ── 迭代级子需求 ────────────────────────────────────────────
+
+export const listSubitems = (iterationId: string): Promise<RequirementSubitem[]> =>
+  invoke(() => bridge().list_subitems(iterationId))
+
+export const createSubitem = (
+  iterationId: string,
+  input: CreateSubitemInput,
+): Promise<RequirementSubitem> => invoke(() => bridge().create_subitem(iterationId, input))
+
+export const updateSubitem = (
+  subitemId: string,
+  patch: UpdateSubitemInput,
+): Promise<RequirementSubitem> => invoke(() => bridge().update_subitem(subitemId, patch))
+
+export const setSubitemStatus = (
+  subitemId: string,
+  status: RequirementStatus,
+): Promise<RequirementSubitem> => invoke(() => bridge().set_subitem_status(subitemId, status))
+
+export const deleteSubitem = (subitemId: string): Promise<boolean> =>
+  invoke(() => bridge().delete_subitem(subitemId))
 
 // ── Bug ──────────────────────────────────────────────────
 

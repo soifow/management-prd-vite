@@ -23,6 +23,7 @@ import type {
   RequirementItem,
   UpdateBugInput,
 } from '@/types'
+import type { Module } from '@/types/module'
 import type { ViewMode } from '@/types/settings'
 
 /** Bug 视图聚合方式（独立于 requirements store 的 viewMode，session 态）。 */
@@ -31,8 +32,8 @@ export const useBugsStore = defineStore('bugs', () => {
   const { activeProjectId } = storeToRefs(projectsStore)
 
   const bugs = ref<BugItem[]>([])
-  /** 当前项目可用的模块（来自 requirements，bug 模块必须出自其中）。 */
-  const modules = ref<string[]>([])
+  /** 当前项目可用的模块（来自 modules 一等实体表，需求与 bug 共享）。 */
+  const modules = ref<Module[]>([])
   const viewMode = ref<ViewMode>('date')
 
   const filters = ref({
@@ -49,7 +50,7 @@ export const useBugsStore = defineStore('bugs', () => {
     () => bugs.value.find((b) => b.id === selectedBugId.value) ?? null,
   )
 
-  /** 应用筛选后的 bug 列表（按级别/状态/关键字）。 */
+  /** 应用筛选后的 bug 列表（按级别/状态/关键字）。关键字匹配模块名拼接与内容。 */
   const filteredBugs = computed(() => {
     let list = bugs.value
     if (filters.value.levels.length > 0) {
@@ -59,7 +60,8 @@ export const useBugsStore = defineStore('bugs', () => {
     if (kw) {
       list = list.filter(
         (b) =>
-          b.module.toLowerCase().includes(kw) || b.content.toLowerCase().includes(kw),
+          b.modules.join(' ').toLowerCase().includes(kw) ||
+          b.content.toLowerCase().includes(kw),
       )
     }
     return list
@@ -71,7 +73,6 @@ export const useBugsStore = defineStore('bugs', () => {
       bugs.value = await listBugs(projectId)
       modules.value = await listModules(projectId)
       // 默认切换项目时关闭详情；keepSelection=true 时保留当前选中 bug
-      // （保存更新后重拉列表不应丢掉 currentBug，否则详情页会误判关联失效）。
       if (!keepSelection) {
         selectedBugId.value = null
         linkedInfo.value = null
@@ -82,9 +83,6 @@ export const useBugsStore = defineStore('bugs', () => {
   }
 
   // 切项目自动加载（与 App.vue 的 requirements watch 并行，互不干扰）
-  // immediate: 本 store 仅在用户进入 Bug 视图（BugPage 等组件首次渲染）时才实例化，
-  // 此时 activeProjectId 早在 App.vue onMounted 阶段就已设好。若不加 immediate，
-  // 这次注册的 watch 错过了已有首值而不触发，导致进 Bug 视图右侧列表为空、需手动切项目才加载。
   watch(
     activeProjectId,
     (id) => {
@@ -128,15 +126,12 @@ export const useBugsStore = defineStore('bugs', () => {
   async function createBugItem(input: CreateBugInput) {
     const b = await createBug(activeProjectId.value!, input)
     await loadBugs(activeProjectId.value!)
-    // 同步刷新侧边栏项目汇总（bug 的增删会影响 requirement_count 口径下的排序）
     await useProjectsStore().loadSummaries()
     return b
   }
 
   async function updateBugItem(id: string, patch: UpdateBugInput) {
     const b = await updateBug(id, patch)
-    // 保留当前选中 bug：重拉列表会替换 bugs.value，但 selectedBugId 仍指向同一条，
-    // currentBug 会自然更新为最新值（含新关联），详情页据此刷新关联信息。
     await loadBugs(activeProjectId.value!, true)
     await refreshLinked()
     return b
@@ -154,18 +149,15 @@ export const useBugsStore = defineStore('bugs', () => {
     return b
   }
 
-  // 关联迭代下拉用：复用项目级 listFeatures / listIterations（已存在的桥接方法）
-  async function listFeaturesFor(module: string): Promise<string[]> {
+  // 关联迭代下拉用：项目级 listFeatures / listIterations（v4 去 module 入参）
+  async function listFeaturesFor(): Promise<string[]> {
     if (!activeProjectId.value) return []
-    return listFeatures(activeProjectId.value, module)
+    return listFeatures(activeProjectId.value)
   }
 
-  async function listIterationsFor(
-    module: string,
-    feature: string,
-  ): Promise<RequirementItem[]> {
+  async function listIterationsFor(feature: string): Promise<RequirementItem[]> {
     if (!activeProjectId.value) return []
-    return listIterations(activeProjectId.value, module, feature)
+    return listIterations(activeProjectId.value, feature)
   }
 
   return {

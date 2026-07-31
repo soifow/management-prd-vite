@@ -35,10 +35,12 @@ from management_prd.models.data import (
     UpdateRequirementInput,
 )
 from management_prd.models.requirement import RequirementItem, RequirementStatus
+from management_prd.models.subitem import CreateSubitemInput, UpdateSubitemInput
 from management_prd.services.bootstrap_service import BootstrapService
 from management_prd.services.bug_service import BugService
 from management_prd.services.db_service import DbService
 from management_prd.services.importer import parse_import
+from management_prd.services.module_service import ModuleService
 from management_prd.services.project_service import ProjectService
 from management_prd.services.settings_service import SettingsService
 
@@ -59,6 +61,7 @@ class WebApi:
         bug_service: BugService | None = None,
         settings_service: SettingsService | None = None,
         bootstrap: BootstrapService | None = None,
+        module_service: ModuleService | None = None,
     ) -> None:
         if project_service is None:
             db = self._default_db()
@@ -67,10 +70,11 @@ class WebApi:
                 bootstrap = db.bootstrap
         else:
             # 外部注入 project_service 时需自带 db 以便复用给 bug_service。
-            db = project_service._db  # type: ignore[attr-defined]
+            db = project_service._db
         self._project_service = project_service
         self._bug_service = bug_service or BugService(db)
         self._settings_service = settings_service or SettingsService(bootstrap)
+        self._module_service = module_service or ModuleService(db)
         self._window: webview.Window | None = None
 
     @staticmethod
@@ -127,19 +131,33 @@ class WebApi:
 
     def list_modules(self, project_id: str) -> object:
         try:
-            return self._project_service.list_modules(project_id)
+            modules = self._module_service.list_modules(project_id)
+            return [m.model_dump(mode="json") for m in modules]
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
-    def list_features(self, project_id: str, module: str) -> object:
+    def create_module(self, project_id: str, name: str) -> object:
         try:
-            return self._project_service.list_features(project_id, module)
+            module = self._project_service.create_module(project_id, name)
+            return module.model_dump(mode="json")
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
-    def list_iterations(self, project_id: str, module: str, feature: str) -> object:
+    def delete_module(self, module_id: str) -> object:
         try:
-            iters = self._project_service.list_iterations(project_id, module, feature)
+            return self._module_service.delete_module(module_id)
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def list_features(self, project_id: str) -> object:
+        try:
+            return self._project_service.list_features(project_id)
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def list_iterations(self, project_id: str, feature: str) -> object:
+        try:
+            iters = self._project_service.list_iterations(project_id, feature)
             return [it.model_dump(mode="json") for it in iters]
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
@@ -173,6 +191,45 @@ class WebApi:
     def delete_requirement(self, item_id: str) -> object:
         try:
             return self._project_service.delete_requirement(item_id)
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    # ---------- 迭代级子需求 ----------
+
+    def list_subitems(self, iteration_id: str) -> object:
+        try:
+            subitems = self._project_service.list_subitems(iteration_id)
+            return [s.model_dump(mode="json") for s in subitems]
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def create_subitem(self, iteration_id: str, input_dict: dict[str, object]) -> object:
+        try:
+            input_ = self._coerce_create_subitem_input(iteration_id, input_dict)
+            subitem = self._project_service.create_subitem(input_)
+            return subitem.model_dump(mode="json")
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def update_subitem(self, subitem_id: str, patch: dict[str, object]) -> object:
+        try:
+            input_ = self._coerce_update_subitem_input(patch)
+            subitem = self._project_service.update_subitem(subitem_id, input_)
+            return subitem.model_dump(mode="json")
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def set_subitem_status(self, subitem_id: str, status: str) -> object:
+        try:
+            rs = RequirementStatus(status)
+            subitem = self._project_service.set_subitem_status(subitem_id, rs)
+            return subitem.model_dump(mode="json")
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def delete_subitem(self, subitem_id: str) -> object:
+        try:
+            return self._project_service.delete_subitem(subitem_id)
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
@@ -354,11 +411,14 @@ class WebApi:
     @staticmethod
     def _coerce_create_input(d: dict[str, object]) -> CreateRequirementInput:
         """把前端传入的 dict 转换为 CreateRequirementInput。"""
-        module = d.get("module", "")
+        module_names_raw = d.get("module_names", [])
+        if not isinstance(module_names_raw, list):
+            raise ValueError("module_names 必须是字符串数组")
+        module_names = [str(m).strip() for m in module_names_raw if str(m).strip()]
         feature = d.get("feature", "")
         content = d.get("content", "")
-        if not isinstance(module, str) or not isinstance(content, str):
-            raise ValueError("module/content 必须是字符串")
+        if not isinstance(content, str):
+            raise ValueError("content 必须是字符串")
         if not isinstance(feature, str):
             raise ValueError("feature 必须是字符串")
         status_raw = d.get("status", RequirementStatus.TODO.value)
@@ -374,7 +434,7 @@ class WebApi:
         if isinstance(deadline_raw, str) and deadline_raw:
             completion_deadline = date.fromisoformat(deadline_raw)
         return CreateRequirementInput(
-            module=module,
+            module_names=module_names,
             feature=feature,
             content=content,
             status=status,
@@ -385,7 +445,12 @@ class WebApi:
     @staticmethod
     def _coerce_update_input(d: dict[str, object]) -> UpdateRequirementInput:
         """把前端传入的 dict 转换为 UpdateRequirementInput。"""
-        module = d.get("module")
+        module_names_raw = d.get("module_names")
+        module_names: list[str] | None = None
+        if module_names_raw is not None:
+            if not isinstance(module_names_raw, list):
+                raise ValueError("module_names 必须是字符串数组")
+            module_names = [str(m).strip() for m in module_names_raw if str(m).strip()]
         feature = d.get("feature")
         content = d.get("content")
         status = d.get("status")
@@ -406,7 +471,7 @@ class WebApi:
             cd = date.fromisoformat(deadline_raw)
         clear_deadline = bool(d.get("clear_completion_deadline", False))
         return UpdateRequirementInput(
-            module=module if isinstance(module, str) else None,
+            module_names=module_names,
             feature=feature if isinstance(feature, str) else None,
             content=content if isinstance(content, str) else None,
             status=rs,
@@ -418,10 +483,13 @@ class WebApi:
     @staticmethod
     def _coerce_create_bug_input(d: dict[str, object]) -> CreateBugInput:
         """把前端传入的 dict 转换为 CreateBugInput。"""
-        module = d.get("module", "")
+        module_names_raw = d.get("module_names", [])
+        if not isinstance(module_names_raw, list):
+            raise ValueError("module_names 必须是字符串数组")
+        module_names = [str(m).strip() for m in module_names_raw if str(m).strip()]
         content = d.get("content", "")
-        if not isinstance(module, str) or not isinstance(content, str):
-            raise ValueError("module/content 必须是字符串")
+        if not isinstance(content, str):
+            raise ValueError("content 必须是字符串")
         level_raw = d.get("level", BugLevel.P3.value)
         if not isinstance(level_raw, str):
             raise ValueError("level 必须是字符串")
@@ -438,7 +506,7 @@ class WebApi:
         if linked_raw is not None and not isinstance(linked_raw, str):
             raise ValueError("linked_iteration_id 必须是字符串")
         return CreateBugInput(
-            module=module,
+            module_names=module_names,
             content=content,
             level=level,
             status=status,
@@ -449,20 +517,68 @@ class WebApi:
     @staticmethod
     def _coerce_update_bug_input(d: dict[str, object]) -> UpdateBugInput:
         """把前端传入的 dict 转换为 UpdateBugInput。"""
+        module_names_raw = d.get("module_names")
+        module_names: list[str] | None = None
+        if module_names_raw is not None:
+            if not isinstance(module_names_raw, list):
+                raise ValueError("module_names 必须是字符串数组")
+            module_names = [str(m).strip() for m in module_names_raw if str(m).strip()]
         level_raw = d.get("level")
         status_raw = d.get("status")
         date_raw = d.get("date")
         linked_raw = d.get("linked_iteration_id")
-        module = d.get("module")
         content = d.get("content")
         return UpdateBugInput(
-            module=module if isinstance(module, str) else None,
+            module_names=module_names,
             content=content if isinstance(content, str) else None,
             level=BugLevel(level_raw) if isinstance(level_raw, str) else None,
             status=BugStatus(status_raw) if isinstance(status_raw, str) else None,
             date=date.fromisoformat(date_raw) if isinstance(date_raw, str) and date_raw else None,
             linked_iteration_id=linked_raw if isinstance(linked_raw, str) and linked_raw else None,
             clear_linked=bool(d.get("clear_linked", False)),
+        )
+
+    @staticmethod
+    def _coerce_create_subitem_input(iteration_id: str, d: dict[str, object]) -> CreateSubitemInput:
+        """把前端传入的 dict 转换为 CreateSubitemInput。"""
+        content = d.get("content", "")
+        if not isinstance(content, str):
+            raise ValueError("content 必须是字符串")
+        status_raw = d.get("status", RequirementStatus.TODO.value)
+        if not isinstance(status_raw, str):
+            raise ValueError("status 必须是字符串")
+        status = RequirementStatus(status_raw)
+        deadline_raw = d.get("completion_deadline")
+        completion_deadline: date | None = None
+        if isinstance(deadline_raw, str) and deadline_raw:
+            completion_deadline = date.fromisoformat(deadline_raw)
+        return CreateSubitemInput(
+            iteration_id=iteration_id,
+            content=content,
+            status=status,
+            completion_deadline=completion_deadline,
+        )
+
+    @staticmethod
+    def _coerce_update_subitem_input(d: dict[str, object]) -> UpdateSubitemInput:
+        """把前端传入的 dict 转换为 UpdateSubitemInput。"""
+        content = d.get("content")
+        status = d.get("status")
+        rs: RequirementStatus | None = None
+        if status is not None:
+            if not isinstance(status, str):
+                raise ValueError("status 必须是字符串")
+            rs = RequirementStatus(status)
+        deadline_raw = d.get("completion_deadline")
+        cd: date | None = None
+        if isinstance(deadline_raw, str) and deadline_raw:
+            cd = date.fromisoformat(deadline_raw)
+        clear_deadline = bool(d.get("clear_completion_deadline", False))
+        return UpdateSubitemInput(
+            content=content if isinstance(content, str) else None,
+            status=rs,
+            completion_deadline=cd,
+            clear_completion_deadline=clear_deadline,
         )
 
     def _open_text_file(self) -> str | None:

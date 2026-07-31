@@ -1,4 +1,4 @@
-"""项目服务测试（v3：单 date + feature，SQLite 后端）。"""
+"""项目服务测试（v4：多模块关联 + 迭代级子需求，SQLite 后端）。"""
 
 from __future__ import annotations
 
@@ -64,17 +64,33 @@ def test_create_requirement(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="模块1",
+            module_names=["模块1"],
             feature="功能X",
             content="第一次描述",
             status=RequirementStatus.TODO,
             date=date(2026, 6, 29),
         ),
     )
-    assert item.module == "模块1"
+    assert item.modules == ["模块1"]
     assert item.feature == "功能X"
     assert item.content == "第一次描述"
     assert item.date == date(2026, 6, 29)
+
+
+def test_create_requirement_requires_module(service: ProjectService) -> None:
+    """v4：至少一个模块，空列表拒绝。"""
+    p = service.create_project("项目A")
+    with pytest.raises(ValueError):
+        service.create_requirement(
+            p.id,
+            CreateRequirementInput(
+                module_names=[],
+                feature="f1",
+                content="c1",
+                status=RequirementStatus.TODO,
+                date=date(2026, 1, 1),
+            ),
+        )
 
 
 def test_create_requirement_feature_defaults_to_content(service: ProjectService) -> None:
@@ -82,7 +98,7 @@ def test_create_requirement_feature_defaults_to_content(service: ProjectService)
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="模块1",
+            module_names=["模块1"],
             feature="",
             content="需求内容",
             status=RequirementStatus.TODO,
@@ -97,7 +113,7 @@ def test_update_requirement(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="m1",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -106,9 +122,9 @@ def test_update_requirement(service: ProjectService) -> None:
     )
     updated = service.update_requirement(
         item.id,
-        UpdateRequirementInput(module="m2", content="c2", status=RequirementStatus.DONE),
+        UpdateRequirementInput(module_names=["m2"], content="c2", status=RequirementStatus.DONE),
     )
-    assert updated.module == "m2"
+    assert updated.modules == ["m2"]
     assert updated.content == "c2"
     assert updated.status == RequirementStatus.DONE
 
@@ -118,7 +134,7 @@ def test_set_status(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -134,7 +150,7 @@ def test_delete_requirement(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -145,7 +161,11 @@ def test_delete_requirement(service: ProjectService) -> None:
     assert service.get(p.id).items == []
 
 
-# ---------- list_modules / list_features / list_iterations ----------
+# ---------- 模块 / list_features / list_iterations ----------
+
+
+def _module_names(service: ProjectService, project_id: str) -> list[str]:
+    return [m.name for m in service.list_modules(project_id)]
 
 
 def test_list_modules(service: ProjectService) -> None:
@@ -153,7 +173,7 @@ def test_list_modules(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="模块B",
+            module_names=["模块B"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -163,24 +183,14 @@ def test_list_modules(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="模块A",
+            module_names=["模块A"],
             feature="f2",
             content="c2",
             status=RequirementStatus.TODO,
             date=date(2026, 1, 1),
         ),
     )
-    service.create_requirement(
-        p.id,
-        CreateRequirementInput(
-            module="",
-            feature="f3",
-            content="c3",
-            status=RequirementStatus.TODO,
-            date=date(2026, 1, 1),
-        ),
-    )
-    assert service.list_modules(p.id) == ["模块A", "模块B"]
+    assert _module_names(service, p.id) == ["模块A", "模块B"]
 
 
 def test_list_features(service: ProjectService) -> None:
@@ -188,7 +198,7 @@ def test_list_features(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="模块1",
+            module_names=["模块1"],
             feature="功能B",
             content="c1",
             status=RequirementStatus.TODO,
@@ -198,14 +208,15 @@ def test_list_features(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="模块1",
+            module_names=["模块1"],
             feature="功能A",
             content="c2",
             status=RequirementStatus.TODO,
             date=date(2026, 1, 1),
         ),
     )
-    assert service.list_features(p.id, "模块1") == ["功能A", "功能B"]
+    # v4：list_features 不再按 module 限定，项目级去重排序
+    assert service.list_features(p.id) == ["功能A", "功能B"]
 
 
 def test_list_iterations(service: ProjectService) -> None:
@@ -214,7 +225,7 @@ def test_list_iterations(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="模块1",
+            module_names=["模块1"],
             feature="功能X",
             content="v1描述",
             status=RequirementStatus.DONE,
@@ -224,19 +235,94 @@ def test_list_iterations(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="模块1",
+            module_names=["模块1"],
             feature="功能X",
             content="v2描述",
             status=RequirementStatus.TODO,
             date=date(2026, 5, 20),
         ),
     )
-    iters = service.list_iterations(p.id, "模块1", "功能X")
+    # v4：list_iterations(project_id, feature)，去 module 参数
+    iters = service.list_iterations(p.id, "功能X")
     assert len(iters) == 2
     assert iters[0].date == date(2026, 3, 27)
     assert iters[0].content == "v1描述"
     assert iters[1].date == date(2026, 5, 20)
     assert iters[1].content == "v2描述"
+
+
+# ---------- 多模块关联（v4） ----------
+
+
+def test_create_requirement_multi_module(service: ProjectService) -> None:
+    """一个需求关联多个模块，任一模块平权。"""
+    p = service.create_project("项目A")
+    item = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["模块A", "模块B"],
+            feature="f1",
+            content="c1",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+        ),
+    )
+    assert item.modules == ["模块A", "模块B"]
+    # 回读一致
+    assert service.get(p.id).items[0].modules == ["模块A", "模块B"]
+    # 两个模块都落表
+    assert _module_names(service, p.id) == ["模块A", "模块B"]
+
+
+def test_update_requirement_replaces_modules(service: ProjectService) -> None:
+    """module_names 整体替换关联（关联表删旧+插新）。旧模块仍留 modules 表（一等实体）。"""
+    p = service.create_project("项目A")
+    item = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["模块A"],
+            feature="f1",
+            content="c1",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+        ),
+    )
+    updated = service.update_requirement(
+        item.id, UpdateRequirementInput(module_names=["模块B", "模块C"])
+    )
+    assert updated.modules == ["模块B", "模块C"]
+    # 关联已替换（不再关联模块A）
+    assert "模块A" not in updated.modules
+    # 模块A 仍留 modules 表（一等实体不自动删孤儿）
+    assert set(_module_names(service, p.id)) == {"模块A", "模块B", "模块C"}
+
+
+def test_create_module_and_delete(service: ProjectService) -> None:
+    p = service.create_project("项目A")
+    m = service.create_module(p.id, "独立模块")
+    assert m.name == "独立模块"
+    assert _module_names(service, p.id) == ["独立模块"]
+    # 未关联，可删
+    assert service.delete_module(m.id) is True
+    assert _module_names(service, p.id) == []
+
+
+def test_delete_module_rejects_when_in_use(service: ProjectService) -> None:
+    """模块仍关联需求时拒绝删除。"""
+    p = service.create_project("项目A")
+    service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["模块A"],
+            feature="f1",
+            content="c1",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+        ),
+    )
+    m = service.list_modules(p.id)[0]
+    with pytest.raises(ValueError):
+        service.delete_module(m.id)
 
 
 # ---------- 汇总 list_date（项目列表日期口径） ----------
@@ -248,7 +334,7 @@ def test_summary_default_mode_is_latest_any(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="done1",
             status=RequirementStatus.DONE,
@@ -258,7 +344,7 @@ def test_summary_default_mode_is_latest_any(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f2",
             content="ui1",
             status=RequirementStatus.UI_DONE_WAITING_BACKEND,
@@ -268,7 +354,7 @@ def test_summary_default_mode_is_latest_any(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f3",
             content="todo1",
             status=RequirementStatus.TODO,
@@ -286,7 +372,7 @@ def test_summary_mode_latest_done(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="done1",
             status=RequirementStatus.DONE,
@@ -296,7 +382,7 @@ def test_summary_mode_latest_done(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f2",
             content="ui1",
             status=RequirementStatus.UI_DONE_WAITING_BACKEND,
@@ -306,7 +392,7 @@ def test_summary_mode_latest_done(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f3",
             content="todo1",
             status=RequirementStatus.TODO,
@@ -323,7 +409,7 @@ def test_summary_mode_latest_done_none_when_only_todo(service: ProjectService) -
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="todo1",
             status=RequirementStatus.TODO,
@@ -340,7 +426,7 @@ def test_summary_mode_latest_activity(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="todo1",
             status=RequirementStatus.TODO,
@@ -358,7 +444,10 @@ def test_list_summaries_sorted_newest_first_empty_last(service: ProjectService) 
     service.create_requirement(
         pa.id,
         CreateRequirementInput(
-            module="", feature="f", content="c", status=RequirementStatus.TODO,
+            module_names=["m"],
+            feature="f",
+            content="c",
+            status=RequirementStatus.TODO,
             date=date(2026, 7, 30),
         ),
     )
@@ -366,7 +455,10 @@ def test_list_summaries_sorted_newest_first_empty_last(service: ProjectService) 
     service.create_requirement(
         pb.id,
         CreateRequirementInput(
-            module="", feature="f", content="c", status=RequirementStatus.TODO,
+            module_names=["m"],
+            feature="f",
+            content="c",
+            status=RequirementStatus.TODO,
             date=date(2026, 1, 1),
         ),
     )
@@ -467,6 +559,45 @@ def test_apply_import_skips_unselected(service: ProjectService) -> None:
     assert project.items == []
 
 
+# ---------- 同 (feature, date) upsert 并入（v4） ----------
+
+
+def test_create_same_feature_date_upserts_as_subitem(service: ProjectService) -> None:
+    """同 (feature, date) 已存在 -> 并入：模块合并、新 content 作为子需求。"""
+    p = service.create_project("项目A")
+    service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["模块A"],
+            feature="功能X",
+            content="第一段",
+            status=RequirementStatus.DONE,
+            date=date(2026, 6, 29),
+        ),
+    )
+    # 同 feature + 同 date，不同模块、不同 content
+    service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["模块B"],
+            feature="功能X",
+            content="第二段",
+            status=RequirementStatus.TODO,
+            date=date(2026, 6, 29),
+        ),
+    )
+    project = service.get(p.id)
+    # 只有一条迭代（UNIQUE 约束 + upsert 并入）
+    assert len(project.items) == 1
+    it = project.items[0]
+    # 模块合并（并集）
+    assert it.modules == ["模块A", "模块B"]
+    # 第二段作为子需求追加
+    subitems = service.list_subitems(it.id)
+    assert len(subitems) == 1
+    assert subitems[0].content == "第二段"
+
+
 # ---------- persistence ----------
 
 
@@ -478,7 +609,7 @@ def test_persistence_across_instances(tmp_path: Path) -> None:
     s1.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -500,7 +631,7 @@ def test_create_requirement_with_deadline(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="m1",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -511,7 +642,7 @@ def test_create_requirement_with_deadline(service: ProjectService) -> None:
     assert item.completion_deadline == date(2026, 2, 1)
     # 回读路径（get / list_iterations）一致
     assert service.get(p.id).items[0].completion_deadline == date(2026, 2, 1)
-    iters = service.list_iterations(p.id, "m1", "f1")
+    iters = service.list_iterations(p.id, "f1")
     assert iters[0].completion_deadline == date(2026, 2, 1)
 
 
@@ -520,7 +651,7 @@ def test_create_requirement_no_deadline_defaults_none(service: ProjectService) -
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -538,7 +669,7 @@ def test_create_deferred_forces_deadline_none(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.DEFERRED,
@@ -555,7 +686,7 @@ def test_update_deferred_clears_deadline(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -577,7 +708,7 @@ def test_update_clear_deadline_flag(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -598,7 +729,7 @@ def test_update_set_deadline(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -618,7 +749,7 @@ def test_update_skip_deadline_when_not_provided(service: ProjectService) -> None
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -637,7 +768,7 @@ def test_set_status_deferred_clears_deadline(service: ProjectService) -> None:
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -655,7 +786,7 @@ def test_set_status_non_deferred_keeps_deadline(service: ProjectService) -> None
     item = service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m1"],
             feature="f1",
             content="c1",
             status=RequirementStatus.TODO,
@@ -666,6 +797,94 @@ def test_set_status_non_deferred_keeps_deadline(service: ProjectService) -> None
     updated = service.set_status(item.id, RequirementStatus.UI_DONE_WAITING_BACKEND)
     assert updated.status == RequirementStatus.UI_DONE_WAITING_BACKEND
     assert updated.completion_deadline == date(2026, 2, 1)
+
+
+# ---------- 迭代级子需求 CRUD（v4） ----------
+
+
+def test_subitem_crud(service: ProjectService) -> None:
+    from management_prd.models.subitem import CreateSubitemInput, UpdateSubitemInput
+
+    p = service.create_project("项目A")
+    it = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["m1"],
+            feature="f1",
+            content="c1",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+        ),
+    )
+    # 新建两条子需求，seq 自增
+    s1 = service.create_subitem(
+        CreateSubitemInput(iteration_id=it.id, content="子1", status=RequirementStatus.TODO)
+    )
+    s2 = service.create_subitem(
+        CreateSubitemInput(iteration_id=it.id, content="子2", status=RequirementStatus.DONE)
+    )
+    assert s1.seq == 1
+    assert s2.seq == 2
+    items = service.list_subitems(it.id)
+    assert [x.content for x in items] == ["子1", "子2"]
+    # 更新
+    upd = service.update_subitem(
+        s1.id, UpdateSubitemInput(content="子1改", status=RequirementStatus.DONE)
+    )
+    assert upd.content == "子1改"
+    assert upd.status == RequirementStatus.DONE
+    # 删除
+    assert service.delete_subitem(s2.id) is True
+    assert len(service.list_subitems(it.id)) == 1
+
+
+def test_subitem_deferred_clears_deadline(service: ProjectService) -> None:
+    from management_prd.models.subitem import CreateSubitemInput
+
+    p = service.create_project("项目A")
+    it = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["m1"],
+            feature="f1",
+            content="c1",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+        ),
+    )
+    s = service.create_subitem(
+        CreateSubitemInput(
+            iteration_id=it.id,
+            content="子1",
+            status=RequirementStatus.DEFERRED,
+            completion_deadline=date(2026, 5, 1),  # 应被忽略
+        )
+    )
+    assert s.completion_deadline is None
+
+
+def test_subitem_cascade_delete_with_iteration(service: ProjectService) -> None:
+    """删迭代 -> 子需求级联删除，无孤儿。"""
+    from management_prd.models.subitem import CreateSubitemInput
+
+    p = service.create_project("项目A")
+    it = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["m1"],
+            feature="f1",
+            content="c1",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+        ),
+    )
+    service.create_subitem(
+        CreateSubitemInput(iteration_id=it.id, content="子1", status=RequirementStatus.TODO)
+    )
+    # 删迭代
+    service.delete_requirement(it.id)
+    # 子需求随之消失
+    assert service.list_subitems(it.id) == []
 
 
 # ---------- list_todo_reminders ----------
@@ -684,7 +903,7 @@ def test_todo_excludes_done(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="done-item",
             status=RequirementStatus.DONE,
@@ -702,7 +921,7 @@ def test_todo_deferred_always_included_at_end(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="m1",
+            module_names=["m1"],
             feature="f1",
             content="deferred-item",
             status=RequirementStatus.DEFERRED,
@@ -720,7 +939,7 @@ def test_todo_no_deadline_respects_switch(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="no-deadline-item",
             status=RequirementStatus.TODO,
@@ -742,7 +961,7 @@ def test_todo_threshold_filtering(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="within",
             status=RequirementStatus.TODO,
@@ -754,7 +973,7 @@ def test_todo_threshold_filtering(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f2",
             content="beyond",
             status=RequirementStatus.TODO,
@@ -773,7 +992,7 @@ def test_todo_overdue_bucket(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="overdue-item",
             status=RequirementStatus.TODO,
@@ -794,7 +1013,7 @@ def test_todo_remaining_bucket_and_sort(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="overdue",
             status=RequirementStatus.TODO,
@@ -806,7 +1025,7 @@ def test_todo_remaining_bucket_and_sort(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f2",
             content="today",
             status=RequirementStatus.TODO,
@@ -817,7 +1036,7 @@ def test_todo_remaining_bucket_and_sort(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f3",
             content="five-days",
             status=RequirementStatus.TODO,
@@ -829,7 +1048,7 @@ def test_todo_remaining_bucket_and_sort(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f4",
             content="no-deadline",
             status=RequirementStatus.TODO,
@@ -840,7 +1059,7 @@ def test_todo_remaining_bucket_and_sort(service: ProjectService) -> None:
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f5",
             content="deferred",
             status=RequirementStatus.DEFERRED,
@@ -870,7 +1089,7 @@ def test_todo_cross_project_aggregation(service: ProjectService) -> None:
     service.create_requirement(
         pa.id,
         CreateRequirementInput(
-            module="模块A",
+            module_names=["模块A"],
             feature="f1",
             content="a-item",
             status=RequirementStatus.TODO,
@@ -881,7 +1100,7 @@ def test_todo_cross_project_aggregation(service: ProjectService) -> None:
     service.create_requirement(
         pb.id,
         CreateRequirementInput(
-            module="模块B",
+            module_names=["模块B"],
             feature="f1",
             content="b-item",
             status=RequirementStatus.TODO,
@@ -892,7 +1111,7 @@ def test_todo_cross_project_aggregation(service: ProjectService) -> None:
     reminders = service.list_todo_reminders(threshold_days=7, show_no_deadline=False)
     project_names = sorted(r["project_name"] for r in reminders)
     assert project_names == ["项目A", "项目B"]
-    # 每条带项目名/模块
+    # 每条带项目名/模块（v4：module 取首个模块名）
     for r in reminders:
         assert r["project_name"] in {"项目A", "项目B"}
         assert r["module"] in {"模块A", "模块B"}
@@ -906,7 +1125,7 @@ def test_todo_threshold_zero_includes_only_overdue_and_deferred(
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f1",
             content="overdue",
             status=RequirementStatus.TODO,
@@ -917,7 +1136,7 @@ def test_todo_threshold_zero_includes_only_overdue_and_deferred(
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f2",
             content="future",
             status=RequirementStatus.TODO,
@@ -928,7 +1147,7 @@ def test_todo_threshold_zero_includes_only_overdue_and_deferred(
     service.create_requirement(
         p.id,
         CreateRequirementInput(
-            module="",
+            module_names=["m"],
             feature="f3",
             content="deferred",
             status=RequirementStatus.DEFERRED,
