@@ -209,16 +209,6 @@ function cancelAddSubitem() {
   newSubitemContent.value = ''
 }
 
-async function onToggleSubitemDone(subitemId: string, current: RequirementStatus) {
-  // 勾选 = 切 done；取消 = 切 todo（高频）
-  const next: RequirementStatus = current === 'done' ? 'todo' : 'done'
-  try {
-    await store.setSubitemStatusItem(subitemId, next)
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : '更新失败')
-  }
-}
-
 async function onSubitemStatusChange(subitemId: string, status: RequirementStatus) {
   try {
     await store.setSubitemStatusItem(subitemId, status)
@@ -376,10 +366,6 @@ const subitemProgressText = computed(() => {
       <div class="subitem-list">
         <div v-if="currentSubitems.length === 0" class="subitem-empty">暂无子需求</div>
         <div v-for="s in currentSubitems" :key="s.id" class="subitem-row">
-          <el-checkbox
-            :model-value="s.status === 'done'"
-            @change="onToggleSubitemDone(s.id, s.status)"
-          />
           <span class="subitem-seq">{{ s.seq }}.</span>
           <span class="subitem-content">{{ s.content }}</span>
           <el-select
@@ -604,8 +590,8 @@ const subitemProgressText = computed(() => {
 }
 .subitem-row {
   display: flex;
-  /* 顶部对齐：不同子需求长度不同，行高按内容自适应 */
-  align-items: flex-start;
+  /* 垂直居中：序号/内容/选择器/日期/删除按钮在行内对齐居中 */
+  align-items: center;
   gap: 8px;
   padding: 6px 4px;
   border-bottom: 1px solid #f3f4f6;
