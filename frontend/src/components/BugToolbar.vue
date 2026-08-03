@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
 import { ref } from 'vue'
 
 import { useProjectsStore } from '@/stores/projects'
 import { useBugsStore } from '@/stores/bugs'
 import BugEditDialog from '@/components/BugEditDialog.vue'
-import { LEVEL_LABEL } from '@/types/bug'
-import type { BugLevel } from '@/types'
+import { LEVEL_LABEL, BUG_STATUS_LABEL } from '@/types/bug'
+import { IPixelPlus } from '@/constants/icons'
+import type { BugLevel, BugStatus } from '@/types'
 
 const projectsStore = useProjectsStore()
 const bugsStore = useBugsStore()
@@ -20,6 +20,10 @@ const editVisible = ref(false)
 const levelOptions: { value: BugLevel; label: string }[] = (
   Object.keys(LEVEL_LABEL) as BugLevel[]
 ).map((k) => ({ value: k, label: LEVEL_LABEL[k] }))
+
+const statusOptions: { value: BugStatus; label: string }[] = (
+  Object.keys(BUG_STATUS_LABEL) as BugStatus[]
+).map((k) => ({ value: k, label: BUG_STATUS_LABEL[k] }))
 
 function openCreate() {
   if (!activeProjectId.value) {
@@ -46,6 +50,16 @@ function openCreate() {
     >
       <el-option v-for="opt in levelOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
     </el-select>
+    <el-select
+      v-model="filters.statuses"
+      multiple
+      collapse-tags
+      collapse-tags-tooltip
+      placeholder="状态筛选"
+      style="width: 150px"
+    >
+      <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+    </el-select>
     <el-input
       v-model="filters.keyword"
       placeholder="关键字（模块/内容）"
@@ -55,7 +69,7 @@ function openCreate() {
 
     <div class="spacer" />
 
-    <el-button :icon="Plus" type="primary" @click="openCreate" :disabled="!activeProjectId">
+    <el-button :icon="IPixelPlus" type="primary" @click="openCreate" :disabled="!activeProjectId">
       bug
     </el-button>
 

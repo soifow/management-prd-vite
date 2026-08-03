@@ -1,11 +1,27 @@
 <script setup lang="ts">
-import { Bell, Document, Setting, WarningFilled } from '@element-plus/icons-vue'
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+
+import { useTodoStore } from '@/stores/todo'
+import {
+  IPixelAppWindows,
+  IPixelBell,
+  IPixelBellOff,
+  IPixelDebug,
+  IPixelSettings,
+} from '@/constants/icons'
 
 defineProps<{ activeKey: 'workspace' | 'settings' | 'bug' }>()
 const emit = defineEmits<{
   (e: 'select', key: 'workspace' | 'settings' | 'bug'): void
   (e: 'open-todo'): void
 }>()
+
+// 待办列表非空 -> 亮铃铛；为空 -> 静音铃铛。
+// todoStore.reminders 在需求状态/时限/增删变更后由 requirements store 自动刷新，故铃铛实时反映。
+const todoStore = useTodoStore()
+const { reminders } = storeToRefs(todoStore)
+const hasReminders = computed(() => reminders.value.length > 0)
 
 function onSelectWorkspace() {
   emit('select', 'workspace')
@@ -31,19 +47,23 @@ function onOpenTodo() {
     -->
     <el-tooltip content="工作区" placement="right">
       <div class="menu-item" :class="{ 'is-active': activeKey === 'workspace' }" @click="onSelectWorkspace">
-        <el-icon><Document /></el-icon>
+        <el-icon><IPixelAppWindows /></el-icon>
       </div>
     </el-tooltip>
     <el-tooltip content="Bug 管理" placement="right">
       <div class="menu-item" :class="{ 'is-active': activeKey === 'bug' }" @click="onSelectBug">
-        <el-icon><WarningFilled /></el-icon>
+        <el-icon><IPixelDebug /></el-icon>
       </div>
     </el-tooltip>
 
-    <!-- 待办提醒：覆盖在主 UI 上的抽屉，不改变主 UI 高亮（无 is-active） -->
+    <!-- 待办提醒：覆盖在主 UI 上的抽屉，不改变主 UI 高亮（无 is-active）。
+         铃铛按待办列表是否为空切换 bell/bell-off，实时反映「有待办」状态。 -->
     <el-tooltip content="待办提醒" placement="right">
       <div class="menu-item" @click="onOpenTodo">
-        <el-icon><Bell /></el-icon>
+        <el-icon>
+          <IPixelBell v-if="hasReminders" />
+          <IPixelBellOff v-else />
+        </el-icon>
       </div>
     </el-tooltip>
 
@@ -52,7 +72,7 @@ function onOpenTodo() {
     <!-- 底部：设置 -->
     <el-tooltip content="设置" placement="right">
       <div class="menu-item" :class="{ 'is-active': activeKey === 'settings' }" @click="onSelectSettings">
-        <el-icon><Setting /></el-icon>
+        <el-icon><IPixelSettings /></el-icon>
       </div>
     </el-tooltip>
   </el-aside>
@@ -89,4 +109,3 @@ function onOpenTodo() {
   background: #409eff;
 }
 </style>
-

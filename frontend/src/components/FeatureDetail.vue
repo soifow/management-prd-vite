@@ -2,10 +2,10 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElInput, ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
 import { MdEditor } from 'md-editor-v3'
 
 import { MD_EDITOR_PROPS } from '@/constants/md-editor'
+import { IPixelPlus, IPixelTrash } from '@/constants/icons'
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
 import type { RequirementStatus, RequirementSubitem } from '@/types'
@@ -264,7 +264,7 @@ const subitemProgressText = computed(() => {
         <span class="title">功能：{{ selectedFeature.feature || '（未命名）' }}</span>
       </template>
       <template #extra>
-        <el-button :icon="Plus" type="primary" @click="onNewIteration">新建迭代</el-button>
+        <el-button :icon="IPixelPlus" type="primary" @click="onNewIteration">新建迭代</el-button>
       </template>
     </el-page-header>
 
@@ -342,7 +342,7 @@ const subitemProgressText = computed(() => {
                   {{ STATUS_LABEL[it.status] }}
                 </el-tag>
                 <el-button
-                  :icon="Delete"
+                  :icon="IPixelTrash"
                   link
                   size="small"
                   type="danger"
@@ -388,7 +388,7 @@ const subitemProgressText = computed(() => {
             @update:model-value="(v: string | null) => onSubitemDeadlineChange(s.id, v, s.status)"
           />
           <el-button
-            :icon="Delete"
+            :icon="IPixelTrash"
             link
             size="small"
             type="danger"

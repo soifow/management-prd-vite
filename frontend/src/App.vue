@@ -26,6 +26,7 @@ const settingsStore = useSettingsStore()
 const todoStore = useTodoStore()
 const { activeProjectId } = storeToRefs(projectsStore)
 const { selectedFeature, viewMode } = storeToRefs(requirementsStore)
+const { reminders } = storeToRefs(todoStore)
 
 /** 当前视图：workspace=工作区，bug=Bug 管理，settings=设置页 */
 const currentView = ref<'workspace' | 'bug' | 'settings'>('workspace')
@@ -46,9 +47,11 @@ onMounted(async () => {
     // 并行加载项目列表与设置；设置就绪后初始化聚合视图
     await Promise.all([projectsStore.loadSummaries(), settingsStore.loadSettings()])
     requirementsStore.setViewMode(settingsStore.defaultViewMode)
-    // 启动后加载待办并自动弹出抽屉
+    // 启动后加载待办；仅当存在待办提醒时才自动弹出抽屉，空列表不打扰
     await todoStore.load()
-    todoVisible.value = true
+    if (reminders.value.length > 0) {
+      todoVisible.value = true
+    }
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '初始化失败')
   }

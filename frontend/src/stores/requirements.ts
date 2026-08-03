@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import { useProjectsStore } from '@/stores/projects'
+import { useTodoStore } from '@/stores/todo'
 
 import {
   applyImport,
@@ -182,6 +183,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
       completion_deadline: completionDeadline ?? undefined,
     })
     await loadSubitems(iterationId)
+    refreshTodo()
     return sub
   }
 
@@ -189,6 +191,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     const sub = await updateSubitem(subitemId, patch)
     const itId = selectedIterationId.value
     if (itId) await loadSubitems(itId)
+    refreshTodo()
     return sub
   }
 
@@ -196,6 +199,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     const sub = await setSubitemStatus(subitemId, status)
     const itId = selectedIterationId.value
     if (itId) await loadSubitems(itId)
+    refreshTodo()
     return sub
   }
 
@@ -203,6 +207,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     await deleteSubitem(subitemId)
     const itId = selectedIterationId.value
     if (itId) await loadSubitems(itId)
+    refreshTodo()
   }
 
   async function createIteration(input: CreateRequirementInput) {
@@ -215,6 +220,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     }
     selectedIterationId.value = item.id
     await loadSubitems(item.id)
+    refreshTodo()
     return item
   }
 
@@ -232,6 +238,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
       // 当前选中迭代若仍存在，重新加载其子需求（modules 已回填）
       if (selectedIterationId.value) await loadSubitems(selectedIterationId.value)
     }
+    refreshTodo()
     return item
   }
 
@@ -241,6 +248,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     if (selectedFeature.value) {
       await loadIterations(selectedFeature.value.feature)
     }
+    refreshTodo()
     return item
   }
 
@@ -258,6 +266,13 @@ export const useRequirementsStore = defineStore('requirements', () => {
       // 迭代删空则关闭详情
       if (iters.length === 0) closeFeature()
     }
+    refreshTodo()
+  }
+
+  /** 需求状态/时限/增删变化后刷新跨项目待办列表（fire-and-forget，不阻塞 UI）。
+   *  待办列表是否为空驱动主菜单铃铛 bell/bell-off 切换，故需实时同步。 */
+  function refreshTodo() {
+    void useTodoStore().load()
   }
 
   async function refreshAfterMutation() {
@@ -280,11 +295,14 @@ export const useRequirementsStore = defineStore('requirements', () => {
     project.value = await applyImport(project.value.id, requirements)
     modules.value = await listModules(project.value.id)
     await useProjectsStore().loadSummaries()
+    refreshTodo()
   }
 
   /** 新建项目并将导入需求写入，返回新建的项目（后续由调用方刷新并选中）。 */
   async function applyAsNewProject(name: string, requirements: ParsedRequirement[]): Promise<Project> {
-    return await applyImportAsNewProject(name, requirements)
+    const p = await applyImportAsNewProject(name, requirements)
+    refreshTodo()
+    return p
   }
 
   async function exportCurrent(): Promise<string | null> {

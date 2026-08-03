@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Edit, Plus } from '@element-plus/icons-vue'
 
 import { useProjectsStore } from '@/stores/projects'
 import { useBugsStore } from '@/stores/bugs'
+import { IPixelPencil, IPixelPlus, IPixelTrash } from '@/constants/icons'
 import ProjectDialog from '@/components/ProjectDialog.vue'
 import type { ViewMode } from '@/types'
 import { formatDate } from '@/utils'
@@ -82,7 +82,7 @@ function selectProject(id: string) {
 
     <div class="actions">
       <el-button plain size="small" class="action-btn" @click="openCreate">
-        <el-icon class="action-icon"><Plus /></el-icon>
+        <el-icon class="action-icon"><IPixelPlus /></el-icon>
         <span>新建项目</span>
       </el-button>
     </div>
@@ -98,8 +98,8 @@ function selectProject(id: string) {
         <div class="item-top">
           <span class="name" :title="p.name">{{ p.name }}</span>
           <span class="ops">
-            <el-icon @click.stop="onRename(p.id)"><Edit /></el-icon>
-            <el-icon @click.stop="onDelete(p.id)"><Delete /></el-icon>
+            <el-icon @click.stop="onRename(p.id)"><IPixelPencil /></el-icon>
+            <el-icon @click.stop="onDelete(p.id)"><IPixelTrash /></el-icon>
           </span>
         </div>
         <div v-if="p.list_date" class="item-meta">

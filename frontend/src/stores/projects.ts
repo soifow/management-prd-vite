@@ -7,6 +7,7 @@ import {
   listProjects,
   renameProject,
 } from '@/api'
+import { useTodoStore } from '@/stores/todo'
 import type { ProjectSummary } from '@/types'
 
 export const useProjectsStore = defineStore('projects', () => {
@@ -56,6 +57,8 @@ export const useProjectsStore = defineStore('projects', () => {
     if (activeProjectId.value === projectId) {
       activeProjectId.value = summaries.value[0]?.id ?? null
     }
+    // 删项目会移除其下需求，跨项目待办列表需同步（fire-and-forget，不阻塞 UI）
+    void useTodoStore().load()
   }
 
   function select(projectId: string) {

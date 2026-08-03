@@ -2,10 +2,16 @@
 import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Edit, Upload, FolderAdd } from '@element-plus/icons-vue'
 
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
+import {
+  IPixelFolderPlus,
+  IPixelPencil,
+  IPixelPlus,
+  IPixelTrash,
+  IPixelUpload,
+} from '@/constants/icons'
 import ProjectDialog from '@/components/ProjectDialog.vue'
 import ImportPreviewDialog from '@/components/ImportPreviewDialog.vue'
 import type { ViewMode } from '@/types'
@@ -108,11 +114,11 @@ async function onImportAsNew() {
 
     <div class="actions">
       <el-button plain size="small" class="action-btn" @click="openCreate">
-        <el-icon class="action-icon"><Plus /></el-icon>
+        <el-icon class="action-icon"><IPixelPlus /></el-icon>
         <span>新建项目</span>
       </el-button>
       <el-button plain size="small" class="action-btn" @click="onImportAsNew">
-        <el-icon class="action-icon"><FolderAdd /></el-icon>
+        <el-icon class="action-icon"><IPixelFolderPlus /></el-icon>
         <span>导入新建项目</span>
       </el-button>
       <el-button
@@ -122,7 +128,7 @@ async function onImportAsNew() {
         :disabled="!activeProjectId"
         @click="onImportCurrent"
       >
-        <el-icon class="action-icon"><Upload /></el-icon>
+        <el-icon class="action-icon"><IPixelUpload /></el-icon>
         <span>导入当前项目</span>
       </el-button>
     </div>
@@ -138,8 +144,8 @@ async function onImportAsNew() {
         <div class="item-top">
           <span class="name" :title="p.name">{{ p.name }}</span>
           <span class="ops">
-            <el-icon @click.stop="onRename(p.id)"><Edit /></el-icon>
-            <el-icon @click.stop="onDelete(p.id)"><Delete /></el-icon>
+            <el-icon @click.stop="onRename(p.id)"><IPixelPencil /></el-icon>
+            <el-icon @click.stop="onDelete(p.id)"><IPixelTrash /></el-icon>
           </span>
         </div>
         <div class="item-meta">

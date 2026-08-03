@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { RefreshRight } from '@element-plus/icons-vue'
+import { IPixelReload } from '@/constants/icons'
 
 import { useTodoStore } from '@/stores/todo'
 import { STATUS_LABEL, STATUS_TAG_TYPE } from '@/types/requirement'
@@ -93,7 +93,7 @@ function onClickItem(item: TodoReminder) {
     <template #header>
       <div class="drawer-head">
         <span class="drawer-title">待办提醒</span>
-        <el-button :icon="RefreshRight" link :loading="loading" @click="onRefresh">
+        <el-button :icon="IPixelReload" link :loading="loading" @click="onRefresh">
           刷新
         </el-button>
       </div>

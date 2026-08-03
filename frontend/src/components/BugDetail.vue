@@ -2,10 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete } from '@element-plus/icons-vue'
 import { MdEditor } from 'md-editor-v3'
 
 import { MD_EDITOR_PROPS } from '@/constants/md-editor'
+import { IPixelTrash } from '@/constants/icons'
 import { useBugsStore } from '@/stores/bugs'
 import { useProjectsStore } from '@/stores/projects'
 import {
@@ -187,7 +187,7 @@ function onIterationChange(id: string | null) {
         <span class="title">{{ currentBug.content.slice(0, 20) || '（空）' }}</span>
       </template>
       <template #extra>
-        <el-button :icon="Delete" type="danger" @click="onDelete">删除</el-button>
+        <el-button :icon="IPixelTrash" type="danger" @click="onDelete">删除</el-button>
       </template>
     </el-page-header>
 

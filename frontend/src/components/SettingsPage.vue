@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Sort } from '@element-plus/icons-vue'
+import { IPixelFolder, IPixelSortVertical } from '@/constants/icons'
 
 import { useSettingsStore } from '@/stores/settings'
 import { whenReady } from '@/api'
@@ -230,7 +230,7 @@ async function onSave() {
           @drop="onDrop(g.key, $event)"
           @dragend="onDragEnd"
         >
-          <el-icon v-if="editingOrder" class="drag-handle"><Sort /></el-icon>
+          <el-icon v-if="editingOrder" class="drag-handle"><IPixelSortVertical /></el-icon>
           <span class="tab-label">{{ g.label }}</span>
         </div>
         <div v-if="editingOrder" class="edit-hint">拖拽手柄调整顺序</div>
@@ -255,7 +255,7 @@ async function onSave() {
                 <el-input
                   :model-value="storageInfo?.storage_dir ?? '加载中…'"
                   readonly
-                  :icon="Folder"
+                  :icon="IPixelFolder"
                 >
                   <template #append>
                     <el-button :loading="loading" @click="onChangeStorage">更改位置</el-button>
@@ -345,7 +345,7 @@ async function onSave() {
 
     <footer class="page-footer">
       <el-button @click="onToggleOrder">
-        <el-icon><Sort /></el-icon>
+        <el-icon><IPixelSortVertical /></el-icon>
         {{ editingOrder ? '完成' : '顺序' }}
       </el-button>
       <el-button type="primary" @click="onSave">保存</el-button>

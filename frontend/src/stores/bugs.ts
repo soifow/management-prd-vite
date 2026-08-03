@@ -39,6 +39,7 @@ export const useBugsStore = defineStore('bugs', () => {
   const filters = ref({
     keyword: '',
     levels: [] as BugLevel[],
+    statuses: [] as BugStatus[],
   })
 
   const selectedBugId = ref<string | null>(null)
@@ -55,6 +56,9 @@ export const useBugsStore = defineStore('bugs', () => {
     let list = bugs.value
     if (filters.value.levels.length > 0) {
       list = list.filter((b) => filters.value.levels.includes(b.level))
+    }
+    if (filters.value.statuses.length > 0) {
+      list = list.filter((b) => filters.value.statuses.includes(b.status))
     }
     const kw = filters.value.keyword.trim().toLowerCase()
     if (kw) {

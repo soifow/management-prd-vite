@@ -2,10 +2,13 @@ import { fileURLToPath, URL } from 'node:url'
 
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+import Icons from 'unplugin-icons/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [vue()],
+  // unplugin-icons：编译时按需把 ~icons/{set}/{name} 解析成 Vue 组件，离线打包内联 SVG。
+  // 不开 autoInstall，依赖由 pnpm 显式管理（已装 @iconify-json/pixelarticons）。
+  plugins: [vue(), Icons({})],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
