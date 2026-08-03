@@ -350,3 +350,44 @@ def test_v3_v4_migration_is_idempotent(tmp_path: Path) -> None:
             0
         ]
         assert req_bugs == 0
+
+
+# ---------- 迁移前自动备份 ----------
+
+
+def test_migration_creates_backup_for_db_with_data(tmp_path: Path) -> None:
+    """含用户数据的旧库迁移前应整库快照，备份是合法 SQLite 且保留迁移前数据。"""
+    db_path = tmp_path / "requment.db"
+    _build_v1_db(db_path)  # 含 1 个 project + 1 条 requirement，schema_version=1
+    DbService(db_path=db_path).init_db()
+
+    backups = list(tmp_path.glob("requment.db.v1.*.bak"))
+    assert len(backups) == 1
+    # 备份是合法 SQLite，且保留迁移前的旧结构（requirements 仍带 module 列）与数据
+    bconn = sqlite3.connect(backups[0])
+    bconn.row_factory = sqlite3.Row
+    assert bconn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
+    assert bconn.execute("SELECT COUNT(*) FROM requirements").fetchone()[0] == 1
+    cols = {r["name"] for r in bconn.execute("PRAGMA table_info(requirements)")}
+    assert "module" in cols  # 迁移前旧结构
+    sv = bconn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
+    assert int(sv["value"]) == 1  # 迁移前版本号
+    bconn.close()
+
+
+def test_fresh_db_migration_skips_backup(tmp_path: Path) -> None:
+    """全新库（无用户数据）迁移不应产生备份文件。"""
+    db_path = tmp_path / "requment.db"
+    DbService(db_path=db_path).init_db()
+    assert list(tmp_path.glob("requment.db.v*.bak")) == []
+
+
+def test_already_latest_schema_skips_backup(tmp_path: Path) -> None:
+    """已是最新版本的库再次 init 不迁移、不备份。"""
+    db_path = tmp_path / "requment.db"
+    _build_v1_db(db_path)
+    DbService(db_path=db_path).init_db()  # 首次：v1->v4，产生 1 个备份
+    first_backups = list(tmp_path.glob("requment.db.v*.bak"))
+    assert len(first_backups) == 1
+    DbService(db_path=db_path).init_db()  # 第二次：已是 v4，不备份
+    assert list(tmp_path.glob("requment.db.v*.bak")) == first_backups

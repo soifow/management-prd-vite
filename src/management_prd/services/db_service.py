@@ -268,16 +268,20 @@ class DbService:
         在 :meth:`init_db` 中表已建好后调用。新增表结构变更时 +1 版本号并在此追加
         ``elif version < N`` 分支。
 
-        迁移期间关闭 ``foreign_keys``（PRAGMA 在事务外切换才生效），避免 DROP TABLE
-        触发级联删除导致关联表数据丢失。迁移完成后重新开启。
+        迁移前对含用户数据的库做整库快照（ :meth:`_backup_database` ），迁移失败可据回滚，
+        避免结构变化引起数据损坏。迁移期间关闭 ``foreign_keys``（PRAGMA 在事务外切换才
+        生效），避免 DROP TABLE 触发级联删除导致关联表数据丢失。迁移完成后重新开启。
         """
         row = conn.execute("SELECT value FROM _meta WHERE key='schema_version'").fetchone()
         version = int(row["value"]) if row else 1
         if version >= CURRENT_DB_SCHEMA_VERSION:
-            return  # 无需迁移，跳过 FK 切换
+            return  # 无需迁移，跳过备份与 FK 切换
 
         # 迁移期关闭 FK：先 commit 退出当前事务，再切换 PRAGMA
         conn.commit()
+        # 结构变更前整库备份（仅含用户数据的库；失败则阻断迁移——宁保持旧结构也不裸改）
+        if conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] > 0:
+            self._backup_database(version)
         conn.execute("PRAGMA foreign_keys = OFF")
 
         try:
@@ -287,6 +291,31 @@ class DbService:
             conn.execute("PRAGMA foreign_keys = ON")
 
         logger.info("SQLite schema 自检完成: v%d -> v%d", version, CURRENT_DB_SCHEMA_VERSION)
+
+    def _backup_database(self, from_version: int) -> Path:
+        """迁移前整库快照（含 WAL 未 checkpoint 数据），文件名含源版本号与时间戳。
+
+        用 ``sqlite3`` 的 backup API 而非 ``shutil.copy``：WAL 模式下未 checkpoint 的
+        页也会被正确写入备份文件，避免快照缺数据。备份失败直接抛出并清理半成品文件、
+        阻断迁移——没有快照就不改结构（参见 v4 迁移 CASCADE 清空关联表的踩坑）。全新库
+        无用户数据时不进入此方法（见 :meth:`_self_check_schema` 的 projects 计数守卫）。
+        """
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_path = self._path.parent / f"{self._path.name}.v{from_version}.{timestamp}.bak"
+        backup_path.unlink(missing_ok=True)  # 同秒重名（极罕见）先清空，保证目标干净
+        src = sqlite3.connect(str(self._path))
+        dst = sqlite3.connect(str(backup_path))
+        try:
+            src.backup(dst)
+        except Exception:
+            dst.close()
+            src.close()
+            backup_path.unlink(missing_ok=True)
+            raise
+        dst.close()
+        src.close()
+        logger.info("数据库迁移前已备份: %s", backup_path)
+        return backup_path
 
     def _run_migrations(self, conn: sqlite3.Connection, version: int) -> None:
         # v2: requirements 增加 completion_deadline（可空）。新增可空列用 ALTER TABLE ADD COLUMN，

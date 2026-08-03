@@ -90,6 +90,14 @@
 
 **How to apply:** 未来新增任何「一次性数据迁移」时沿用此模式——在 `_meta` 加一个独立标记键做守卫，成功才置位、失败可重入，切勿用时间或外部状态判断是否已迁移。
 
+### 迁移前自动整库备份（2026-08-03）
+
+**凡触发 schema 版本迁移（`version < CURRENT_DB_SCHEMA_VERSION`）的库，在切换 FK/跑迁移分支之前，`_self_check_schema` 会先调用 `_backup_database(from_version)` 做整库快照。** 备份文件落在数据库同目录，命名 `requment.db.v{旧版本}.{YYYYMMDD-HHMMSS}.bak`。用 `sqlite3.Connection.backup()` 而非 `shutil.copy`——WAL 模式下未 checkpoint 的页也会被正确写入。**含用户数据才备份**（`projects` 表计数 > 0 守卫），全新库空迁移不产生备份；已是最新版本的库 `init_db` 不进入迁移分支、不备份。备份失败直接抛异常并清理半成品文件、阻断迁移——没有快照就不改结构。
+
+**Why:** v4 迁移曾因 `DROP TABLE` 在 `foreign_keys=ON` 下 CASCADE 清空关联表，且无快照可回滚，只能靠 SQLite free page 字节扫描做取证式恢复（`scripts/recover_v4_migration.py`），既费力又只能恢复残留于空闲页的部分内容。事后人工清理也无法还原全部丢失需求。迁移前自动备份把「结构变化引起数据损坏」从灾难降为可回滚事故。
+
+**How to apply:** ① 新增迁移分支时无需手写备份——`_self_check_schema` 已统一在迁移前调用 `_backup_database`。② 测试含数据的旧库迁移时，可断言 `tmp_path` 下出现 `requment.db.v{旧版本}.*.bak` 且备份是合法 SQLite、保留迁移前结构与版本号（见 `test_db_service.py::test_migration_creates_backup_for_db_with_data`）。③ 回滚灾难时直接 `shutil.copy(backup, db_path)` 覆盖即可。
+
 ### 完成时限 + 待办提醒抽屉（2026-07-29）
 
 设计方案：`docs/design/completion-deadline-todo-reminder.md`。关键技术决策：
