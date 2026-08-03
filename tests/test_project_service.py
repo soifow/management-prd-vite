@@ -838,6 +838,45 @@ def test_subitem_crud(service: ProjectService) -> None:
     assert len(service.list_subitems(it.id)) == 1
 
 
+def test_subitem_update_deadline(service: ProjectService) -> None:
+    """子需求 deadline 设值：返回值与持久化都应是新值（非 deferred 路径）。
+
+    回归 UI bug「选了日期但控件未显示」：确认后端 update_subitem 对 completion_deadline
+    的设值分支返回正确值，且重新读取一致。
+    """
+    from management_prd.models.subitem import CreateSubitemInput, UpdateSubitemInput
+
+    p = service.create_project("项目A")
+    it = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["m1"],
+            feature="f1",
+            content="c1",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+        ),
+    )
+    s = service.create_subitem(
+        CreateSubitemInput(iteration_id=it.id, content="子1", status=RequirementStatus.TODO)
+    )
+    assert s.completion_deadline is None
+
+    # 设值（status 同传入参，模拟 UI 一并带上）
+    upd = service.update_subitem(
+        s.id,
+        UpdateSubitemInput(
+            completion_deadline=date(2026, 8, 10),
+            clear_completion_deadline=False,
+            status=RequirementStatus.TODO,
+        ),
+    )
+    assert upd.completion_deadline == date(2026, 8, 10)
+    # 重新读取一致
+    again = service.list_subitems(it.id)
+    assert again[0].completion_deadline == date(2026, 8, 10)
+
+
 def test_subitem_deferred_clears_deadline(service: ProjectService) -> None:
     from management_prd.models.subitem import CreateSubitemInput
 
@@ -1157,3 +1196,98 @@ def test_todo_threshold_zero_includes_only_overdue_and_deferred(
     reminders = service.list_todo_reminders(threshold_days=0, show_no_deadline=False)
     contents = sorted(r["content"] for r in reminders)
     assert contents == ["deferred", "overdue"]
+
+
+def test_todo_subitem_granularity(service: ProjectService) -> None:
+    """待办提醒最小粒度为子需求：有子需求时按子需求逐条返回，无子需求回退到迭代。"""
+    from management_prd.models.subitem import CreateSubitemInput
+
+    p = service.create_project("项目A")
+    # 迭代 f1：有两条子需求（一 todo 一 done）
+    it = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["m"],
+            feature="f1",
+            content="iter-content",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+        ),
+    )
+    service.create_subitem(
+        CreateSubitemInput(
+            iteration_id=it.id,
+            content="子需求A",
+            status=RequirementStatus.TODO,
+            completion_deadline=_today(),
+        ),
+    )
+    service.create_subitem(
+        CreateSubitemInput(
+            iteration_id=it.id,
+            content="子需求B",
+            status=RequirementStatus.DONE,  # done 不纳入
+        ),
+    )
+    # 迭代 f2：无子需求，自身作为一条提醒
+    service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["m"],
+            feature="f2",
+            content="bare-iter",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+            completion_deadline=_today(),
+        ),
+    )
+
+    reminders = service.list_todo_reminders(threshold_days=7, show_no_deadline=True)
+    contents = sorted(r["content"] for r in reminders)
+    # 子需求A（粒度到子需求）+ bare-iter（无子需求回退迭代）；
+    # 子需求B done 被排除；iter-content 不再单独出现（已被子需求A取代）
+    assert contents == ["bare-iter", "子需求A"]
+    # 子需求A 带 subitem_id，bare-iter 的 subitem_id 为 None
+    by_content = {r["content"]: r for r in reminders}
+    assert by_content["子需求A"]["subitem_id"] is not None
+    assert by_content["bare-iter"]["subitem_id"] is None
+
+
+def test_todo_subitem_inherits_iter_deadline(service: ProjectService) -> None:
+    """子需求默认继承迭代 deadline，但可独立修改/删除（待办按子需求自身 deadline 计算）。"""
+    from management_prd.models.subitem import CreateSubitemInput, UpdateSubitemInput
+
+    p = service.create_project("项目A")
+    it = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["m"],
+            feature="f1",
+            content="c1",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 1),
+            completion_deadline=_today() + _timedelta_days(3),
+        ),
+    )
+    # 子需求继承迭代 deadline（3 天后 -> 剩余 3）
+    s = service.create_subitem(
+        CreateSubitemInput(
+            iteration_id=it.id,
+            content="子1",
+            status=RequirementStatus.TODO,
+            completion_deadline=_today() + _timedelta_days(3),
+        ),
+    )
+    reminders = service.list_todo_reminders(threshold_days=7, show_no_deadline=True)
+    assert len(reminders) == 1
+    assert reminders[0]["subitem_id"] == s.id
+    assert reminders[0]["remaining_days"] == 3
+
+    # 子需求改成 30 天后 -> 超阈值被排除（与迭代 deadline 解耦）
+    service.update_subitem(
+        s.id,
+        UpdateSubitemInput(completion_deadline=_today() + _timedelta_days(30)),
+    )
+    reminders = service.list_todo_reminders(threshold_days=7, show_no_deadline=True)
+    assert reminders == []
+

@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import { MdEditor } from 'md-editor-v3'
 
+import { MD_EDITOR_PROPS } from '@/constants/md-editor'
 import { useBugsStore } from '@/stores/bugs'
 import { useProjectsStore } from '@/stores/projects'
 import {
@@ -232,8 +233,7 @@ function onIterationChange(id: string | null) {
           <MdEditor
             v-model="bufferContent"
             :key="currentBug.id"
-            :preview="false"
-            :code-foldable="false"
+            v-bind="MD_EDITOR_PROPS"
             class="editor"
           />
         </div>

@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { MdEditor } from 'md-editor-v3'
 
+import { MD_EDITOR_PROPS } from '@/constants/md-editor'
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
 import type { RequirementStatus } from '@/types'
@@ -196,7 +197,7 @@ async function onSubmit() {
       </el-form-item>
       <el-form-item label="内容">
         <div class="editor-wrapper">
-          <MdEditor v-model="contentInput" :preview="false" :code-foldable="false" />
+          <MdEditor v-model="contentInput" v-bind="MD_EDITOR_PROPS" />
         </div>
       </el-form-item>
     </el-form>

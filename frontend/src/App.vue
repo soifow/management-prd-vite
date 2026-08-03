@@ -132,18 +132,21 @@ async function onJumpToItem(item: TodoReminder) {
   <el-container class="layout">
     <AppNavMenu :active-key="currentView" @select="onNavSelect" @open-todo="onOpenTodo" />
 
-    <!-- 设置页：替换整个右侧区域 -->
-    <template v-if="currentView === 'settings'">
+    <!--
+      三个视图常驻、用 v-show 切显隐（而非 v-if 互斥渲染）：
+      切走不卸载、切回不重建，避免 FeatureDetail / md-editor-v3 反复挂载导致性能累积下降，
+      并保留工作区状态（选中功能/迭代/子需求），杜绝切回后详情页空白。
+      .view 作为 flex 行容器承载各视图内部的 el-aside + el-main。
+    -->
+    <div v-show="currentView === 'settings'" class="view">
       <SettingsPage @save="onSettingsSave" />
-    </template>
+    </div>
 
-    <!-- Bug 管理：独立侧边栏 + 主内容 -->
-    <template v-else-if="currentView === 'bug'">
+    <div v-show="currentView === 'bug'" class="view">
       <BugPage @jump-requirement="onJumpToRequirement" />
-    </template>
+    </div>
 
-    <!-- 工作区：项目侧边栏 + 主内容 -->
-    <template v-else>
+    <div v-show="currentView === 'workspace'" class="view">
       <el-aside width="210px" class="aside">
         <ProjectSidebar />
       </el-aside>
@@ -155,7 +158,7 @@ async function onJumpToItem(item: TodoReminder) {
           <RequirementTree v-else />
         </div>
       </el-main>
-    </template>
+    </div>
 
     <TodoDrawer v-model="todoVisible" @jump="onJumpToItem" />
   </el-container>
@@ -164,6 +167,14 @@ async function onJumpToItem(item: TodoReminder) {
 <style scoped>
 .layout {
   height: 100%;
+}
+/* 视图容器：与 el-container 同向 flex 行，承接各视图内部 el-aside + el-main */
+.view {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 .aside {
   background: #ffffff;

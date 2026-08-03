@@ -276,49 +276,70 @@ class ProjectService:
         threshold_days: int,
         show_no_deadline: bool,
     ) -> list[dict[str, object]]:
-        """跨全部项目返回待办提醒列表。
+        """跨全部项目返回待办提醒列表（子需求粒度）。
 
         纳入规则（仅排除 ``done``）：``deferred`` 始终纳入置末尾；非 deferred 无时限项
         受 ``show_no_deadline`` 控制；非 deferred 有时限项仅 ``remaining_days <= threshold``
         纳入。``module`` 字段用子查询取展示模块名回填。
+
+        每条子需求独立计算 bucket/remaining_days；无子需求的迭代本身也作为一条
+        提醒（content 取迭代 content，subitem_id 为 None）。
         """
         today = date.today()
         with self._db.transaction() as conn:
-            rows = conn.execute(
+            # ── 子需求级 ──
+            sub_rows = conn.execute(
                 """
-                SELECT r.id, r.project_id, p.name AS project_name,
-                       r.feature, r.content, r.status, r.date, r.completion_deadline,
+                SELECT s.id AS subitem_id, s.content, s.status, s.completion_deadline,
+                       r.id AS item_id, r.project_id, r.feature, r.date,
+                       p.name AS project_name,
                        (SELECT m.name FROM requirement_modules rm
                          JOIN modules m ON m.id = rm.module_id
                          WHERE rm.requirement_id = r.id
                          ORDER BY m.name LIMIT 1) AS module
-                FROM requirements r JOIN projects p ON p.id = r.project_id
+                FROM requirement_subitems s
+                JOIN requirements r ON r.id = s.iteration_id
+                JOIN projects p ON p.id = r.project_id
+                WHERE s.status <> 'done'
+                  AND r.status <> 'done'
+                """,
+            ).fetchall()
+
+            # ── 无子需求的迭代（自身作为一条提醒）──
+            iter_rows = conn.execute(
+                """
+                SELECT r.id AS item_id, r.project_id, r.feature, r.content, r.status,
+                       r.date, r.completion_deadline,
+                       p.name AS project_name,
+                       (SELECT m.name FROM requirement_modules rm
+                         JOIN modules m ON m.id = rm.module_id
+                         WHERE rm.requirement_id = r.id
+                         ORDER BY m.name LIMIT 1) AS module
+                FROM requirements r
+                JOIN projects p ON p.id = r.project_id
                 WHERE r.status <> 'done'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM requirement_subitems s
+                    WHERE s.iteration_id = r.id AND s.status <> 'done'
+                  )
                 """,
             ).fetchall()
 
         reminders: list[dict[str, object]] = []
-        for r in rows:
+
+        # 子需求行
+        for r in sub_rows:
             status = RequirementStatus(r["status"])
             deadline_raw = r["completion_deadline"]
-            if status == RequirementStatus.DEFERRED:
-                bucket = "deferred"
-                remaining: int | None = None
-            elif not deadline_raw:
-                if not show_no_deadline:
-                    continue
-                bucket = "no_deadline"
-                remaining = None
-            else:
-                deadline = date.fromisoformat(deadline_raw)
-                remaining = (deadline - today).days
-                if remaining > threshold_days:
-                    continue
-                bucket = "overdue" if remaining < 0 else "remaining"
-
+            bucket, remaining = self._todo_bucket_and_remaining(
+                status, deadline_raw, today, threshold_days, show_no_deadline,
+            )
+            if bucket is None:
+                continue
             reminders.append(
                 {
-                    "item_id": r["id"],
+                    "subitem_id": r["subitem_id"],
+                    "item_id": r["item_id"],
                     "project_id": r["project_id"],
                     "project_name": r["project_name"],
                     "module": r["module"],
@@ -329,7 +350,33 @@ class ProjectService:
                     "completion_deadline": deadline_raw,
                     "remaining_days": remaining,
                     "bucket": bucket,
-                }
+                },
+            )
+
+        # 无子需求的迭代行
+        for r in iter_rows:
+            status = RequirementStatus(r["status"])
+            deadline_raw = r["completion_deadline"]
+            bucket, remaining = self._todo_bucket_and_remaining(
+                status, deadline_raw, today, threshold_days, show_no_deadline,
+            )
+            if bucket is None:
+                continue
+            reminders.append(
+                {
+                    "subitem_id": None,
+                    "item_id": r["item_id"],
+                    "project_id": r["project_id"],
+                    "project_name": r["project_name"],
+                    "module": r["module"],
+                    "feature": r["feature"],
+                    "content": r["content"],
+                    "status": status.value,
+                    "date": r["date"],
+                    "completion_deadline": deadline_raw,
+                    "remaining_days": remaining,
+                    "bucket": bucket,
+                },
             )
 
         reminders.sort(
@@ -341,6 +388,28 @@ class ProjectService:
             )
         )
         return reminders
+
+    @staticmethod
+    def _todo_bucket_and_remaining(
+        status: RequirementStatus,
+        deadline_raw: str | None,
+        today: date,
+        threshold_days: int,
+        show_no_deadline: bool,
+    ) -> tuple[str | None, int | None]:
+        """计算单条待办的 bucket 与 remaining_days；不符合纳入条件返回 (None, None)。"""
+        if status == RequirementStatus.DEFERRED:
+            return "deferred", None
+        if not deadline_raw:
+            if not show_no_deadline:
+                return None, None
+            return "no_deadline", None
+        deadline = date.fromisoformat(deadline_raw)
+        remaining = (deadline - today).days
+        if remaining > threshold_days:
+            return None, None
+        bucket = "overdue" if remaining < 0 else "remaining"
+        return bucket, remaining
 
     # ---------- 需求迭代 ----------
 

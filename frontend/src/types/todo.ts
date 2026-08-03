@@ -10,15 +10,17 @@ import type { RequirementStatus } from './requirement'
 /** 待办分组桶：决定在抽屉中的分组位置与排序。 */
 export type TodoBucket = 'overdue' | 'remaining' | 'no_deadline' | 'deferred'
 
-/** 一条待办提醒（跨项目聚合）。 */
+/** 一条待办提醒（跨项目聚合，子需求粒度）。 */
 export interface TodoReminder {
+  /** 子需求 id；为 null 表示该提醒来自无子需求的迭代本身 */
+  subitem_id: string | null
   /** 需求迭代 id（点击跳转时用于选中该迭代） */
   item_id: string
   project_id: string
   project_name: string
   module: string
   feature: string
-  /** 需求简述（内容正文，前端截断展示） */
+  /** 需求简述（子需求内容或迭代内容，前端截断展示） */
   content: string
   status: RequirementStatus
   /** 迭代日期 ISO yyyy-MM-dd */

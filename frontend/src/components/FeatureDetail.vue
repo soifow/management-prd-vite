@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElInput, ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { MdEditor } from 'md-editor-v3'
 
+import { MD_EDITOR_PROPS } from '@/constants/md-editor'
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
-import type { RequirementStatus } from '@/types'
+import type { RequirementStatus, RequirementSubitem } from '@/types'
 import { STATUS_LABEL, STATUS_TAG_TYPE } from '@/types/requirement'
 import { formatDate } from '@/utils'
 import RequirementEditDialog from '@/components/RequirementEditDialog.vue'
@@ -35,6 +36,26 @@ const bufferFeature = ref('')
 const bufferDeadline = ref<string | null>(null)
 const featureOptions = ref<string[]>([])
 
+// 子需求底部新增态：必须在下方 watch(selectedIteration, {immediate:true}) 之前声明，
+// 否则 immediate 回调同步执行时引用到 TDZ 抛 ReferenceError（视图切回重挂时触发）。
+const isAddingSubitem = ref(false)
+const newSubitemContent = ref('')
+const addInputRef = ref<InstanceType<typeof ElInput> | null>(null)
+
+/**
+ * 子需求完成时限的乐观本地缓冲：subitemId -> 本地值。
+ * 子需求 deadline picker 直绑 store 受控模式时，change 后异步 loadSubitems 回填前，
+ * picker 内部值会被旧 :model-value 回退，导致「选了日期但不生效」。
+ * 改动先写本地覆盖让 picker 即时反映，后端写入成功后删除该 key 由 store 真值接管。
+ */
+const subitemDeadlineOverride = ref<Record<string, string | null>>({})
+
+/** 取某子需求当前应显示的 deadline：本地覆盖优先，回退 store 值。 */
+function displayDeadline(s: RequirementSubitem): string | null {
+  if (s.id in subitemDeadlineOverride.value) return subitemDeadlineOverride.value[s.id]
+  return s.completion_deadline
+}
+
 // 模块名候选（来自 modules 一等实体表）
 const moduleOptions = computed(() => modules.value.map((m) => m.name))
 
@@ -58,6 +79,11 @@ watch(
       bufferModuleNames.value = [...it.modules]
       bufferFeature.value = it.feature
       bufferDeadline.value = it.completion_deadline
+      // 切换迭代时退出底部新增态，避免残留输入跨迭代误写入
+      isAddingSubitem.value = false
+      newSubitemContent.value = ''
+      // 切迭代时清空子需求 deadline 本地覆盖，避免跨迭代残留
+      subitemDeadlineOverride.value = {}
       void refreshFeatureOptions()
     }
   },
@@ -149,18 +175,38 @@ watch(allSubitemsDone, async (done) => {
   }
 })
 
-// 子需求行内新建
-const newSubitemContent = ref('')
-async function onAddSubitem() {
+// 子需求底部空行新建（isAddingSubitem / newSubitemContent / addInputRef 已在顶部声明）
+
+// 进入新增态：渲染 textarea 后聚焦
+async function startAddSubitem() {
+  isAddingSubitem.value = true
+  newSubitemContent.value = ''
+  await nextTick()
+  addInputRef.value?.focus()
+}
+
+// 确定：内容非空才写入，空内容视作取消
+async function confirmAddSubitem() {
   const itId = selectedIterationId.value
   const content = newSubitemContent.value.trim()
-  if (!itId || !content) return
-  try {
-    await store.addSubitem(itId, content, 'todo')
+  if (!itId || !content) {
+    isAddingSubitem.value = false
     newSubitemContent.value = ''
+    return
+  }
+  try {
+    // 默认继承当前迭代（主需求）的完成时限；用户可随后任意修改/删除
+    await store.addSubitem(itId, content, 'todo', selectedIteration.value?.completion_deadline ?? null)
+    newSubitemContent.value = ''
+    isAddingSubitem.value = false
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '添加子需求失败')
   }
+}
+
+function cancelAddSubitem() {
+  isAddingSubitem.value = false
+  newSubitemContent.value = ''
 }
 
 async function onToggleSubitemDone(subitemId: string, current: RequirementStatus) {
@@ -186,13 +232,19 @@ async function onSubitemDeadlineChange(
   deadline: string | null,
   status: RequirementStatus,
 ) {
+  // 乐观本地覆盖：picker 即时反映新值，避免受控模式下异步回填前的回退
+  subitemDeadlineOverride.value = { ...subitemDeadlineOverride.value, [subitemId]: deadline }
   try {
     await store.patchSubitem(subitemId, {
       completion_deadline: deadline ?? undefined,
       clear_completion_deadline: deadline === null,
       status,
     })
+    // 成功后由 store 真值接管
+    delete subitemDeadlineOverride.value[subitemId]
   } catch (e) {
+    // 失败：丢弃本地覆盖，picker 回退到 store 旧值
+    delete subitemDeadlineOverride.value[subitemId]
     ElMessage.error(e instanceof Error ? e.message : '更新失败')
   }
 }
@@ -267,8 +319,7 @@ const subitemProgressText = computed(() => {
             <MdEditor
               v-model="bufferContent"
               :key="selectedIteration?.id"
-              :preview="false"
-              :code-foldable="false"
+              v-bind="MD_EDITOR_PROPS"
               class="editor"
             />
           </div>
@@ -321,16 +372,6 @@ const subitemProgressText = computed(() => {
           📋 子需求清单（当前迭代 · {{ formatDate(selectedIteration.date) }}）
         </span>
         <span v-if="subitemProgressText" class="subitem-progress">{{ subitemProgressText }}</span>
-        <div class="subitem-add">
-          <el-input
-            v-model="newSubitemContent"
-            size="small"
-            placeholder="添加子需求，回车提交"
-            style="width: 260px"
-            @keyup.enter="onAddSubitem"
-          />
-          <el-button :icon="Plus" size="small" type="primary" @click="onAddSubitem">添加</el-button>
-        </div>
       </div>
       <div class="subitem-list">
         <div v-if="currentSubitems.length === 0" class="subitem-empty">暂无子需求</div>
@@ -350,7 +391,7 @@ const subitemProgressText = computed(() => {
             <el-option v-for="st in statusOptions" :key="st" :label="STATUS_LABEL[st]" :value="st" />
           </el-select>
           <el-date-picker
-            :model-value="s.completion_deadline"
+            :model-value="displayDeadline(s)"
             type="date"
             value-format="YYYY-MM-DD"
             clearable
@@ -358,7 +399,7 @@ const subitemProgressText = computed(() => {
             placeholder="时限"
             style="width: 130px"
             :disabled="s.status === 'deferred'"
-            @change="(v: string | null) => onSubitemDeadlineChange(s.id, v, s.status)"
+            @update:model-value="(v: string | null) => onSubitemDeadlineChange(s.id, v, s.status)"
           />
           <el-button
             :icon="Delete"
@@ -367,6 +408,25 @@ const subitemProgressText = computed(() => {
             type="danger"
             @click="onDeleteSubitem(s.id)"
           />
+        </div>
+        <!-- 底部新增行：默认只读占位 + 添加按钮；点击进入多行编辑，添加按钮变为确定 -->
+        <div v-if="!isAddingSubitem" class="subitem-row subitem-add-row" @click="startAddSubitem">
+          <span class="subitem-add-placeholder">＋ 添加子需求…</span>
+          <el-button size="small" type="primary">添加</el-button>
+        </div>
+        <div v-else class="subitem-row subitem-add-row editing">
+          <el-input
+            ref="addInputRef"
+            v-model="newSubitemContent"
+            type="textarea"
+            :autosize="{ minRows: 1, maxRows: 6 }"
+            resize="none"
+            placeholder="输入子需求内容（支持多行），Ctrl+Enter 确定"
+            @keydown.ctrl.enter.prevent="confirmAddSubitem"
+            @keydown.meta.enter.prevent="confirmAddSubitem"
+          />
+          <el-button size="small" type="primary" @click="confirmAddSubitem">确定</el-button>
+          <el-button size="small" @click="cancelAddSubitem">取消</el-button>
         </div>
       </div>
     </div>
@@ -485,10 +545,11 @@ const subitemProgressText = computed(() => {
   border-top: 1px solid #e5e7eb;
   margin-top: 12px;
   padding-top: 10px;
-  max-height: 220px;
+  /* 视口一半为上限；无子需求也保持 30vh 最小高度，保证可见性 */
+  min-height: 30vh;
+  max-height: 50vh;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 .subitem-head {
   display: flex;
@@ -506,10 +567,30 @@ const subitemProgressText = computed(() => {
   font-size: 12px;
   color: #6b7280;
 }
-.subitem-add {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
+/* 底部新增行：复用 subitem-row 的对齐/分隔，只覆盖行内布局 */
+.subitem-add-row {
+  cursor: pointer;
+  /* 顶部对齐：让 textarea 多行时按钮列与首行基线对齐 */
+  align-items: flex-start;
+}
+/* 编辑态：行本身不可点（仅输入框/按钮响应），避免误触 */
+.subitem-add-row.editing {
+  cursor: default;
+}
+/* textarea 占满内容列 */
+.subitem-add-row.editing :deep(.el-input) {
+  flex: 1;
+  min-width: 0;
+}
+/* 默认占位态：提示文字撑满，添加按钮靠右 */
+.subitem-add-placeholder {
+  flex: 1;
+  font-size: 13px;
+  color: #9ca3af;
+  padding: 2px 0;
+}
+.subitem-add-row:hover .subitem-add-placeholder {
+  color: #409eff;
 }
 .subitem-list {
   overflow: auto;
@@ -523,7 +604,8 @@ const subitemProgressText = computed(() => {
 }
 .subitem-row {
   display: flex;
-  align-items: center;
+  /* 顶部对齐：不同子需求长度不同，行高按内容自适应 */
+  align-items: flex-start;
   gap: 8px;
   padding: 6px 4px;
   border-bottom: 1px solid #f3f4f6;
@@ -533,13 +615,17 @@ const subitemProgressText = computed(() => {
   color: #9ca3af;
   font-size: 13px;
   width: 24px;
+  line-height: 1.6;
 }
 .subitem-content {
   flex: 1;
   font-size: 13px;
   color: #1f2937;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 完整显示：保留换行 + 长串自动断行，禁止 ... 截断（子需求没有详情入口） */
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  /* 允许用户选中复制内容 */
+  user-select: text;
 }
 </style>

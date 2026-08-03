@@ -119,10 +119,14 @@ function onClickItem(item: TodoReminder) {
               <span class="project-module">
                 {{ item.project_name }}{{ item.module ? ` - ${item.module}` : '' }}
               </span>
-              <el-tag :type="STATUS_TAG_TYPE[item.status]" size="small">
-                {{ STATUS_LABEL[item.status] }}
-              </el-tag>
+              <span class="meta-tags">
+                <el-tag v-if="item.subitem_id" size="small" type="info" effect="plain">子需求</el-tag>
+                <el-tag :type="STATUS_TAG_TYPE[item.status]" size="small">
+                  {{ STATUS_LABEL[item.status] }}
+                </el-tag>
+              </span>
             </div>
+            <div v-if="item.feature" class="card-row feature">功能：{{ item.feature }}</div>
             <div class="card-row content">{{ item.content || '（空）' }}</div>
             <div v-if="item.completion_deadline" class="card-row deadline">
               🗓 {{ formatDate(item.completion_deadline) }}
@@ -197,6 +201,17 @@ function onClickItem(item: TodoReminder) {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+}
+.meta-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.card-row.feature {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 4px;
 }
 .card-row.content {
   font-size: 13px;

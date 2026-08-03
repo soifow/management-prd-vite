@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder, Sort } from '@element-plus/icons-vue'
 
 import { useSettingsStore } from '@/stores/settings'
+import { whenReady } from '@/api'
 import type { ProjectListDateMode, ViewMode } from '@/types/settings'
 
 const emit = defineEmits<{
@@ -80,6 +81,9 @@ const activeKey = ref<string>(GROUPS[0].key)
 const scrollRef = useTemplateRef<HTMLDivElement>('scrollRef')
 
 onMounted(async () => {
+  // 视图用 v-show 常驻、应用挂载即触发本钩子；须先等待桥接就绪再调后端，
+  // 否则与 App.vue 的 whenReady 并发执行时桥接尚未注入会抛 ApiError。
+  await whenReady()
   await settingsStore.loadStorageInfo()
   await nextTick()
   if (scrollRef.value) scrollRef.value.scrollTop = 0

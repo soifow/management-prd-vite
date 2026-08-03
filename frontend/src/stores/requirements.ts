@@ -169,8 +169,18 @@ export const useRequirementsStore = defineStore('requirements', () => {
     }
   }
 
-  async function addSubitem(iterationId: string, content: string, status: RequirementStatus) {
-    const sub = await createSubitem(iterationId, { iteration_id: iterationId, content, status })
+  async function addSubitem(
+    iterationId: string,
+    content: string,
+    status: RequirementStatus,
+    completionDeadline?: string | null,
+  ) {
+    const sub = await createSubitem(iterationId, {
+      iteration_id: iterationId,
+      content,
+      status,
+      completion_deadline: completionDeadline ?? undefined,
+    })
     await loadSubitems(iterationId)
     return sub
   }
