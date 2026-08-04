@@ -122,6 +122,16 @@ class ModuleService:
         ).fetchall()
         return [r["name"] for r in rows]
 
+    def ids_for_requirement(self, conn: Connection, requirement_id: str) -> list[str]:
+        """返回需求关联的 module id 列表（按 module name 升序，与 names 口径一致）。"""
+        rows = conn.execute(
+            "SELECT m.id FROM requirement_modules rm"
+            " JOIN modules m ON m.id = rm.module_id"
+            " WHERE rm.requirement_id = ? ORDER BY m.name",
+            (requirement_id,),
+        ).fetchall()
+        return [r["id"] for r in rows]
+
     def names_for_bug(self, conn: Connection, bug_id: str) -> list[str]:
         rows = conn.execute(
             "SELECT m.name FROM bug_modules bm"
@@ -130,6 +140,16 @@ class ModuleService:
             (bug_id,),
         ).fetchall()
         return [r["name"] for r in rows]
+
+    def ids_for_bug(self, conn: Connection, bug_id: str) -> list[str]:
+        """返回 bug 关联的 module id 列表（按 module name 升序）。"""
+        rows = conn.execute(
+            "SELECT m.id FROM bug_modules bm"
+            " JOIN modules m ON m.id = bm.module_id"
+            " WHERE bm.bug_id = ? ORDER BY m.name",
+            (bug_id,),
+        ).fetchall()
+        return [r["id"] for r in rows]
 
     # ---------- 删除（独立事务）----------
 

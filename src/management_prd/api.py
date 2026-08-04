@@ -75,6 +75,7 @@ class WebApi:
         self._bug_service = bug_service or BugService(db)
         self._settings_service = settings_service or SettingsService(bootstrap)
         self._module_service = module_service or ModuleService(db)
+        self._db = db  # 供头像缓存等直接访问 storage_dir
         self._window: webview.Window | None = None
 
     @staticmethod
@@ -342,15 +343,71 @@ class WebApi:
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
+    def parse_md_import(self) -> object:
+        """弹打开文件框，解析 .md 双轨格式为 ParsedProject。
+
+        返回 ``{"parsed": {...}, "filename": "xxx"}`` 以便前端用文件名推测项目名。
+        取消返回 None。
+        """
+        try:
+            from management_prd.services.importer import parse_import_md
+
+            picked = self._open_md_file()
+            if not picked:
+                return None
+            path = Path(picked)
+            text = path.read_text(encoding="utf-8")
+            parsed = parse_import_md(text)
+            return {
+                "parsed": parsed.model_dump(mode="json"),
+                "filename": path.stem,
+            }
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def apply_full_import(self, target: dict[str, object], parsed: dict[str, object]) -> object:
+        """应用完整导入（基础/智能共用统一写入路径）。
+
+        ``target`` 形如 ``{"project_id": "..."}``（已有项目）或 ``{"name": "..."}``
+        （新建项目）。``reuse_id`` 由 parsed 中的来源标记决定：基础导入 True、智能导入
+        False（智能导入数据无原始 ID，全新建）。
+        """
+        try:
+            from management_prd.models.data import ParsedProject
+            from management_prd.services.project_service import ProjectTarget
+
+            parsed_obj = ParsedProject.model_validate(parsed)
+            raw_pid = target.get("project_id")
+            raw_name = target.get("name")
+            target_obj = ProjectTarget(
+                project_id=str(raw_pid) if isinstance(raw_pid, str) and raw_pid else None,
+                name=str(raw_name) if isinstance(raw_name, str) else None,
+            )
+            # 智能导入数据无原始 ID（reuse_id=False）；基础导入有（reuse_id=True）。
+            reuse_id = bool(parsed.get("reuse_id", True))
+            project = self._project_service.apply_full_import(
+                target_obj, parsed_obj, reuse_id=reuse_id
+            )
+            return project.model_dump(mode="json")
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
     def export_project(self, project_id: str) -> object:
-        """导出项目为 .txt 文件（弹保存对话框）。"""
+        """[旧版 .txt 导出] 导出项目为 .txt 文件（弹保存对话框）。
+
+        .. deprecated::
+            新版导出走 :meth:`export_project_md`（.md 双轨格式）。本方法保留至
+            第 7 步清理旧代码时移除，此处仅保持向后兼容的最小实现。
+        """
         try:
             project = self._project_service.get(project_id)
             from management_prd.services.exporter import Exporter
 
             exporter = Exporter()
-            content = exporter.export(project)
-            suggested = exporter.suggested_filename(project)
+            # 旧 .txt 格式已废弃：这里复用快照导出 .md 文本作为最小兼容实现。
+            snapshot = self._project_service.get_full_snapshot(project_id)
+            content = exporter.export(snapshot)
+            suggested = exporter.suggested_filename(project.name)
             picked = self._save_dialog(suggested)
             if not picked:
                 return None
@@ -358,6 +415,30 @@ class WebApi:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
             logger.info("需求已导出: %s", target)
+            return str(target)
+        except (ExportError, NotFoundError, StorageError, ValueError) as exc:
+            return _err(exc)
+
+    def export_project_md(self, project_id: str, include_bug: bool = True) -> object:
+        """导出项目为 .md 双轨格式文件（弹保存对话框）。
+
+        先装配完整快照（``get_full_snapshot``），再由 :class:`Exporter` 生成
+        YAML frontmatter + 正文渲染。``include_bug`` 决定是否包含 bug 段。
+        """
+        try:
+            from management_prd.services.exporter import Exporter
+
+            snapshot = self._project_service.get_full_snapshot(project_id)
+            exporter = Exporter()
+            content = exporter.export(snapshot, include_bug=include_bug)
+            suggested = exporter.suggested_filename(snapshot.name)
+            picked = self._save_dialog_md(suggested)
+            if not picked:
+                return None
+            target = Path(picked)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            logger.info("需求已导出(.md): %s", target)
             return str(target)
         except (ExportError, NotFoundError, StorageError, ValueError) as exc:
             return _err(exc)
@@ -678,6 +759,20 @@ class WebApi:
             return str(result[0]) if result else None
         return str(result)
 
+    def _open_md_file(self) -> str | None:
+        """调用 webview 打开文件对话框（.md 默认），返回所选路径或 None。"""
+        if self._window is None:
+            raise ManagementPrdError("WebApi 窗口未注入，无法弹对话框")
+        result = self._window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            file_types=["Markdown 文件 (*.md)", "文本文件 (*.txt)", "所有文件 (*.*)"],
+        )
+        if not result:
+            return None
+        if isinstance(result, (list, tuple)):
+            return str(result[0]) if result else None
+        return str(result)
+
     def _save_dialog(self, suggested: str) -> str | None:
         """调用 webview 保存文件对话框，返回所选路径或 None。"""
         if self._window is None:
@@ -686,6 +781,21 @@ class WebApi:
             webview.SAVE_DIALOG,
             save_filename=suggested,
             file_types=["文本文件 (*.txt)", "所有文件 (*.*)"],
+        )
+        if not result:
+            return None
+        if isinstance(result, (list, tuple)):
+            return str(result[0]) if result else None
+        return str(result)
+
+    def _save_dialog_md(self, suggested: str) -> str | None:
+        """调用 webview 保存文件对话框（.md 默认），返回所选路径或 None。"""
+        if self._window is None:
+            raise ManagementPrdError("WebApi 窗口未注入，无法弹对话框")
+        result = self._window.create_file_dialog(
+            webview.SAVE_DIALOG,
+            save_filename=suggested,
+            file_types=["Markdown 文件 (*.md)", "所有文件 (*.*)"],
         )
         if not result:
             return None

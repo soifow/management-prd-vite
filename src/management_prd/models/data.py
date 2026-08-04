@@ -1,4 +1,4 @@
-"""应用数据与导入模型。"""
+"""应用数据与导入/导出解析模型。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,135 @@ from management_prd.models.project import Project
 from management_prd.models.requirement import RequirementStatus
 
 CURRENT_SCHEMA_VERSION = 1
+
+# ──────────────────────────────────────────────────────────────────────
+# 导入/导出解析模型（.md 双轨格式；详见 docs/design/import-export-redesign.md）
+# ──────────────────────────────────────────────────────────────────────
+
+# 当前支持的 .md frontmatter format_version（独立于 DB schema 版本号体系）。
+SUPPORTED_FORMAT_VERSIONS: set[int] = {1}
+
+
+class ParsedProject(BaseModel):
+    """从 .md frontmatter 解析出的项目快照。
+
+    所有引用字段（``modules`` / ``iterations.modules`` / ``bugs.modules`` /
+    ``bugs.linked_iteration_id``）使用 frontmatter 内的原始 id，导入时由
+    :class:`ProjectService.apply_full_import` 维护 ``id_map`` 重写。
+
+    ``iterations`` 按功能（``feature``）聚合，每条迭代挂若干子需求。子需求与
+    需求迭代一同导出、导入（已确认：子需求参与导入导出）。
+    """
+
+    project_id: str
+    name: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    modules: list[ParsedModule] = Field(default_factory=list)
+    iterations: list[ParsedIteration] = Field(default_factory=list)
+    bugs: list[ParsedBug] = Field(default_factory=list)
+    includes_bug: bool = False
+
+
+class ParsedModule(BaseModel):
+    """frontmatter 模块项。"""
+
+    id: str
+    name: str
+
+
+class ParsedIteration(BaseModel):
+    """frontmatter 迭代项。"""
+
+    id: str
+    feature: str
+    modules: list[str] = Field(default_factory=list)  # module id 列表（原始 id）
+    content: str
+    status: RequirementStatus
+    date: datetime.date
+    completion_deadline: datetime.date | None = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    subitems: list[ParsedSubitem] = Field(default_factory=list)
+    selected: bool = True  # 导入预览可勾选（基础/智能共用）
+
+
+class ParsedSubitem(BaseModel):
+    """frontmatter 子需求项。"""
+
+    seq: int
+    content: str
+    status: RequirementStatus
+    completion_deadline: datetime.date | None = None
+    selected: bool = True  # 导入预览可勾选
+
+
+class ParsedBug(BaseModel):
+    """frontmatter bug 项。
+
+    ``linked`` 引用 :class:`ParsedIteration.id`（原始 id）；目标库未命中该 id 时
+    导入后 ``linked_iteration_id`` 置 None（不报错）。
+    """
+
+    id: str
+    content: str
+    level: str  # P0-P4
+    status: str  # open/fixed
+    modules: list[str] = Field(default_factory=list)
+    linked: str | None = None  # iteration id
+    date: datetime.date
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    selected: bool = True
+
+
+# ──────────────────────────────────────────────────────────────────────
+# LLM 中间格式（智能导入；LLM 友好，无 ID/锚点要求，缺失字段容忍）
+# ──────────────────────────────────────────────────────────────────────
+
+
+class LlmParsedProject(BaseModel):
+    """LLM 智能导入的中间格式。
+
+    bug 关联用 ``(linked_feature, linked_date)``（LLM 产不出内部 ID），导入时按此
+    键查目标迭代；命中则关联，未命中置空。
+    """
+
+    project_name: str
+    modules: list[str] = Field(default_factory=list)
+    iterations: list[LlmParsedIteration] = Field(default_factory=list)
+    bugs: list[LlmParsedBug] = Field(default_factory=list)
+
+
+class LlmParsedIteration(BaseModel):
+    modules: list[str] = Field(default_factory=list)
+    feature: str
+    content: str
+    status: RequirementStatus = RequirementStatus.TODO
+    date: datetime.date
+    completion_deadline: datetime.date | None = None
+    subitems: list[LlmParsedSubitem] = Field(default_factory=list)
+
+
+class LlmParsedSubitem(BaseModel):
+    content: str
+    status: RequirementStatus = RequirementStatus.TODO
+    completion_deadline: datetime.date | None = None
+
+
+class LlmParsedBug(BaseModel):
+    content: str
+    level: str = "P3"
+    status: str = "open"
+    modules: list[str] = Field(default_factory=list)
+    date: datetime.date
+    linked_feature: str | None = None
+    linked_date: datetime.date | None = None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 旧版导入解析模型（v3 文本格式，保留向后兼容至彻底移除）
+# ──────────────────────────────────────────────────────────────────────
 
 
 class AppData(BaseModel):
@@ -37,11 +166,11 @@ class ProjectSummary(BaseModel):
     updated_at: datetime.datetime
 
 
-# ---------- 导入数据（解析预览） ----------
+# ---------- 旧版导入数据（解析预览，v3 文本格式） ----------
 
 
 class ParsedRequirement(BaseModel):
-    """解析得到的一条需求候选（导入预览 / 应用时使用）。
+    """解析得到的一条需求候选（旧版 v3 文本导入，保留至彻底移除）。
 
     每个 ``(date, module, content)`` 产出一条；``feature`` 默认取 ``content``。
     ``module`` 保留以兼容导入解析（导入文本仍是单模块）；``module_names`` 由
@@ -53,12 +182,12 @@ class ParsedRequirement(BaseModel):
     feature: str = ""
     content: str
     status: RequirementStatus = RequirementStatus.DONE
-    date: date
+    date: datetime.date
     selected: bool = True
 
 
 class ParsedImport(BaseModel):
-    """一次导入解析的全部结果。"""
+    """一次导入解析的全部结果（旧版）。"""
 
     requirements: list[ParsedRequirement] = Field(default_factory=list)
 
@@ -73,7 +202,7 @@ class CreateRequirementInput(BaseModel):
     feature: str = ""
     content: str
     status: RequirementStatus = RequirementStatus.TODO
-    date: date
+    date: datetime.date
     completion_deadline: datetime.date | None = None
 
 

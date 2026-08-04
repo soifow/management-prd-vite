@@ -1,127 +1,182 @@
-"""导出器测试（v4：多模块取首个作为展示模块）。"""
+"""导出器测试（.md 双轨格式：frontmatter + 正文）。
+
+v4：多模块取首个作为展示模块；本期重写为 .md 双轨格式（frontmatter 权威 + 正文渲染），
+含 modules / iterations / subitems / bugs 的完整快照导出，bug 可选包含。
+"""
 
 from __future__ import annotations
 
 from datetime import date, datetime
 
-from management_prd.models.project import Project
-from management_prd.models.requirement import RequirementItem, RequirementStatus
-from management_prd.services.exporter import SEPARATOR_LINE, Exporter
-from management_prd.services.importer import parse_import
+from management_prd.errors import ExportError
+from management_prd.models.data import (
+    ParsedBug,
+    ParsedIteration,
+    ParsedModule,
+    ParsedProject,
+    ParsedSubitem,
+)
+from management_prd.models.requirement import RequirementStatus
+from management_prd.services.exporter import Exporter
 
 
-def _make_project() -> Project:
-    now = datetime(2026, 7, 27, 12, 0, 0)
-    return Project(id="p1", name="测试项目", created_at=now, updated_at=now)
-
-
-def _make_item(
-    module: str,
-    feature: str,
-    content: str,
-    status: RequirementStatus,
-    d: date,
-    now: datetime | None = None,
-) -> RequirementItem:
-    now = now or datetime(2026, 7, 27, 12, 0, 0)
-    # v4：RequirementItem 用 modules 列表，导出器取首个作为展示模块；
-    # 空 module 用 "（未分组）" 占位，保留导出文本可读性。
-    modules = [module] if module else ["（未分组）"]
-    return RequirementItem(
-        id=f"i-{content}-{d}",
-        project_id="p1",
-        feature=feature,
-        content=content,
-        status=status,
-        date=d,
-        created_at=now,
-        updated_at=now,
-        modules=modules,
+def _make_snapshot(include_bug: bool = True) -> ParsedProject:
+    now = datetime(2026, 1, 5, 9, 0, 0)
+    return ParsedProject(
+        project_id="p-abc",
+        name="会员系统",
+        created_at=datetime(2026, 1, 1, 10, 0, 0),
+        updated_at=datetime(2026, 1, 2, 12, 0, 0),
+        modules=[
+            ParsedModule(id="m01", name="主界面"),
+            ParsedModule(id="m02", name="账户"),
+        ],
+        iterations=[
+            ParsedIteration(
+                id="it-1",
+                feature="登录",
+                modules=["m01", "m02"],
+                content="实现微信与手机号登录……",
+                status=RequirementStatus.DONE,
+                date=date(2026, 1, 5),
+                completion_deadline=date(2026, 1, 10),
+                created_at=now,
+                updated_at=datetime(2026, 1, 6, 14, 0, 0),
+                subitems=[
+                    ParsedSubitem(
+                        seq=1,
+                        content="微信登录",
+                        status=RequirementStatus.DONE,
+                        completion_deadline=date(2026, 1, 8),
+                    ),
+                    ParsedSubitem(
+                        seq=2, content="手机验证码", status=RequirementStatus.TODO
+                    ),
+                ],
+            ),
+        ],
+        bugs=[
+            ParsedBug(
+                id="bg-1",
+                content="登录回调偶发崩溃",
+                level="P1",
+                status="open",
+                modules=["m01"],
+                linked="it-1",
+                date=date(2026, 1, 6),
+                created_at=datetime(2026, 1, 6, 8, 0, 0),
+                updated_at=datetime(2026, 1, 6, 8, 0, 0),
+            )
+        ],
+        includes_bug=include_bug,
     )
 
 
-def test_export_basic_format() -> None:
-    project = _make_project()
-    project.items.append(
-        _make_item("模块A", "需求1", "需求1", RequirementStatus.DONE, date(2026, 6, 29))
-    )
-    text = Exporter().export(project)
-    lines = text.splitlines()
-    assert lines[0] == SEPARATOR_LINE
-    assert lines[1] == "260629"
-    assert lines[2] == "模块A"
-    assert lines[3] == "1. 需求1【完成】"
+def test_export_frontmatter_structure() -> None:
+    text = Exporter().export(_make_snapshot(), include_bug=True)
+    assert text.startswith("---\n")
+    # frontmatter 结束分隔
+    assert text.count("\n---\n") >= 1
+    assert "format_version: 1" in text
+    assert "includes_bug: true" in text
+    assert "project:" in text
+    assert "modules:" in text
+    assert "iterations:" in text
+    assert "bugs:" in text
 
 
-def test_export_multiple_dates_multiple_segments() -> None:
-    # 同功能不同 date -> 两个 YYMMDD 段
-    project = _make_project()
-    project.items.append(
-        _make_item("模块A", "功能X", "功能X", RequirementStatus.DONE, date(2026, 3, 27))
-    )
-    project.items.append(
-        _make_item("模块A", "功能X", "功能X", RequirementStatus.DONE, date(2026, 5, 20))
-    )
-    text = Exporter().export(project)
-    assert "260327" in text
-    assert "260520" in text
+def test_export_modules_ids_preserved() -> None:
+    text = Exporter().export(_make_snapshot())
+    # 模块原始 id 写入 frontmatter
+    assert "id: m01" in text
+    assert "id: m02" in text
+    assert "name: 主界面" in text
 
 
-def test_export_status_tags() -> None:
-    project = _make_project()
-    project.items.append(_make_item("", "A", "需求A", RequirementStatus.TODO, date(2026, 1, 1)))
-    project.items.append(
-        _make_item("", "B", "需求B", RequirementStatus.UI_DONE_WAITING_BACKEND, date(2026, 1, 1))
-    )
-    project.items.append(_make_item("", "C", "需求C", RequirementStatus.DEFERRED, date(2026, 1, 1)))
-    project.items.append(_make_item("", "D", "需求D", RequirementStatus.DONE, date(2026, 1, 1)))
-    text = Exporter().export(project)
-    assert "【to do】" in text
-    assert "【等待对接】" in text
-    assert "【暂缓】" in text
-    assert "【完成】" in text
+def test_export_iteration_with_subitems_and_deadline() -> None:
+    text = Exporter().export(_make_snapshot())
+    assert "id: it-1" in text
+    assert "deadline: '2026-01-10'" in text  # 迭代截止
+    assert "deadline: '2026-01-08'" in text  # 子需求截止
+    assert "微信登录" in text
+    assert "手机验证码" in text
+    # 子需求 seq + status
+    assert "seq: 1" in text
+    assert "seq: 2" in text
+
+
+def test_export_bug_linked_preserved() -> None:
+    text = Exporter().export(_make_snapshot(), include_bug=True)
+    assert "id: bg-1" in text
+    assert "linked: it-1" in text
+    assert "level: P1" in text
+
+
+def test_export_exclude_bug() -> None:
+    text = Exporter().export(_make_snapshot(), include_bug=False)
+    assert "includes_bug: false" in text
+    assert "bugs:" not in text  # 不含 bug 段
+    # 正文不含「## 缺陷」
+    assert "## 缺陷" not in text
+
+
+def test_export_body_rendering() -> None:
+    text = Exporter().export(_make_snapshot())
+    # 项目名一级标题
+    assert "# 会员系统" in text
+    # 功能二级标题
+    assert "## 功能：登录" in text
+    # 迭代三级标题含日期 + 状态中文
+    assert "### 迭代 2026-01-05 · 完成" in text
+    # 所属模块（按 name 升序）
+    assert "所属模块：主界面、账户" in text
+    # 子需求 checkbox（done -> [x]，todo -> [ ]）
+    assert "- [x] 微信登录" in text
+    assert "- [ ] 手机验证码" in text
+    # 缺陷区
+    assert "## 缺陷" in text
+    assert "### P1 · 2026-01-06 · 待修复" in text
+    assert "关联迭代 {#it-1}" in text
+
+
+def test_export_deferred_omits_deadline() -> None:
+    """deferred 项导出 deadline 为 null（省略，自愈）。"""
+    import yaml
+
+    snap = _make_snapshot()
+    snap.iterations[0].status = RequirementStatus.DEFERRED
+    snap.iterations[0].completion_deadline = None
+    text = Exporter().export(snap)
+    fm = yaml.safe_load(text.split("---\n")[1])
+    # 迭代自身 deadline 省略（自愈）
+    assert "deadline" not in fm["iterations"][0]
+    # 子需求 deadline 保留（子需求独立字段）
+    assert "deadline" in fm["iterations"][0]["subitems"][0]
 
 
 def test_export_empty_project() -> None:
-    project = _make_project()
-    text = Exporter().export(project)
-    assert "暂无需求" in text
+    snap = ParsedProject(
+        project_id="p-empty",
+        name="空项目",
+        created_at=datetime(2026, 1, 1, 0, 0, 0),
+        updated_at=datetime(2026, 1, 1, 0, 0, 0),
+    )
+    text = Exporter().export(snap)
+    assert "format_version: 1" in text
+    assert "modules: []" in text
+    assert "iterations: []" in text
 
 
-def test_roundtrip_export_import() -> None:
-    project = _make_project()
-    project.items.append(
-        _make_item("模块A", "功能X", "功能X", RequirementStatus.DONE, date(2026, 3, 27))
-    )
-    project.items.append(
-        _make_item("模块A", "功能X", "功能X", RequirementStatus.DONE, date(2026, 5, 20))
-    )
-    project.items.append(
-        _make_item("模块A", "需求Y", "需求Y", RequirementStatus.TODO, date(2026, 6, 29))
-    )
-    project.items.append(
-        _make_item(
-            "模块B", "需求Z", "需求Z", RequirementStatus.UI_DONE_WAITING_BACKEND, date(2026, 6, 29)
-        )
-    )
-    text = Exporter().export(project)
-    parsed = parse_import(text)
+def test_export_empty_name_raises() -> None:
+    snap = _make_snapshot()
+    snap.name = ""
+    import pytest
 
-    # v3：每个 (date, module, content) 一条
-    keys = {(r.date, r.module, r.content): r for r in parsed.requirements}
-    assert (date(2026, 3, 27), "模块A", "功能X") in keys
-    assert (date(2026, 5, 20), "模块A", "功能X") in keys
-    assert keys[(date(2026, 3, 27), "模块A", "功能X")].status == RequirementStatus.DONE
-    assert keys[(date(2026, 6, 29), "模块A", "需求Y")].status == RequirementStatus.TODO
-    assert (
-        keys[(date(2026, 6, 29), "模块B", "需求Z")].status
-        == RequirementStatus.UI_DONE_WAITING_BACKEND
-    )
+    with pytest.raises(ExportError):
+        Exporter().export(snap)
 
 
 def test_suggested_filename() -> None:
-    project = _make_project()
-    project.name = "项目/名称*"
-    name = Exporter().suggested_filename(project, now=date(2026, 7, 27))
-    assert name.endswith("_20260727.txt")
+    name = Exporter().suggested_filename("项目/名称*", now=date(2026, 7, 27))
+    assert name.endswith("_20260727.md")
     assert "/" not in name and "*" not in name

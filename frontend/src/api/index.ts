@@ -210,6 +210,10 @@ export const applyImportAsNewProject = (
 export const exportProject = (projectId: string): Promise<string | null> =>
   invoke(() => bridge().export_project(projectId))
 
+/** 导出项目为 .md 双轨格式（frontmatter 权威 + 正文渲染）。include_bug 决定是否含 bug 段。 */
+export const exportProjectMd = (projectId: string, includeBug: boolean): Promise<string | null> =>
+  invoke(() => bridge().export_project_md(projectId, includeBug))
+
 // ── 存储位置 ──────────────────────────────────────────────
 
 export const getStorageInfo = (): Promise<StorageInfo> =>

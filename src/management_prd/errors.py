@@ -24,3 +24,15 @@ class ImportParseError(ManagementPrdError):
 
 class ExportError(ManagementPrdError):
     """导出序列化错误。"""
+
+
+class ImportFormatError(ManagementPrdError):
+    """导入格式错误（format_version 不兼容等）。"""
+
+
+class LlmError(ManagementPrdError):
+    """LLM 调用错误。"""
+
+
+class BackupError(ManagementPrdError):
+    """备份/回滚操作错误。"""

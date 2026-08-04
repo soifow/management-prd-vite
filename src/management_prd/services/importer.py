@@ -1,28 +1,212 @@
-"""宽松 ``.txt`` 需求导入解析器。
+"""需求导入解析器（.md 双轨格式：YAML frontmatter 权威，正文丢弃）。
 
-解析规则（详见设计文档 §7 importer）：
+解析规则（详见设计文档 §6 importer）：
 
-- **分块**：逐行扫描。命中 ``^\\d{6}$``（YYMMDD）开新块（关旧块）；
-  命中分隔行 ``^[=#\\-]{4,}$``（≥4 个相同字符，避开裸 ``###``）关当前块；
-  其余行块开着则收入，否则忽略（丢弃非日期段）。
-- **YYMMDD 世纪**：``yy<=80 -> 20yy else 19yy``。
-- **块体**：date 行后非空行。``1./2./3.`` 编号点；``A.``/``### 标题`` 为模块标题；
-  状态段关键字（``to do``/``todo``/``待办``/``暂缓``）作模块标题且其下点置对应状态。
-- **状态尾标**：剥离行尾 ``【…】``（往返用）。
-- **合并**：按 ``(module, content)`` 聚合为 ParsedRequirement，``dates`` 收集所有出现日期。
+- ``yaml.safe_load`` 读 frontmatter 为权威数据；正文（人类可读渲染）整体丢弃，
+  机器解析以 frontmatter 为准。
+- 校验 ``format_version``：不在 :data:`SUPPORTED_FORMAT_VERSIONS` 内拒绝并提示升级
+  （独立于 DB schema 版本号体系）。
+- 解析结果为 :class:`ParsedProject`，所有引用用 frontmatter 内的原始 id；导入时由
+  :meth:`ProjectService.apply_full_import` 维护 ``id_map`` 重写。
+
+旧版 ``.txt`` 宽松解析（``parse_import`` / ``ParsedImport``）保留至第 7 步清理旧代码
+时移除，向后兼容。
 """
 
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime
+from typing import Any
 
-from management_prd.errors import ImportParseError
-from management_prd.models.data import ParsedImport, ParsedRequirement
-from management_prd.models.requirement import (
+import yaml
+from pydantic import ValidationError
+
+from management_prd.errors import ImportFormatError, ImportParseError
+from management_prd.models.data import (
+    SUPPORTED_FORMAT_VERSIONS,
+    ParsedBug,
+    ParsedIteration,
+    ParsedModule,
+    ParsedProject,
+    ParsedSubitem,
+)
+from management_prd.models.requirement import RequirementStatus
+
+# frontmatter 边界正则：首个 ``---`` 起、次个 ``---`` 止
+_RE_FM_START = re.compile(r"^---\s*$", re.MULTILINE)
+
+
+class Importer:
+    """需求导入解析器（.md 双轨格式）。"""
+
+    def parse(self, text: str) -> ParsedProject:
+        """解析 .md 文本为 :class:`ParsedProject`。
+
+        frontmatter 为权威数据，正文丢弃。校验 ``format_version``。
+        """
+        fm = self._extract_frontmatter(text)
+        if fm is None:
+            raise ImportFormatError("缺少 YAML frontmatter（未找到 '---' 边界）")
+        try:
+            data = yaml.safe_load(fm)
+        except yaml.YAMLError as exc:
+            raise ImportFormatError(f"frontmatter YAML 解析失败: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ImportFormatError("frontmatter 必须是 YAML 映射")
+
+        version = data.get("format_version")
+        if version not in SUPPORTED_FORMAT_VERSIONS:
+            raise ImportFormatError(
+                f"不支持的导出格式版本 format_version={version!r}，"
+                f"当前支持 {sorted(SUPPORTED_FORMAT_VERSIONS)}，请升级应用"
+            )
+
+        includes_bug = bool(data.get("includes_bug", False))
+        return self._build_parsed(data, includes_bug)
+
+    @staticmethod
+    def _extract_frontmatter(text: str) -> str | None:
+        """提取首对 ``---`` 之间的 frontmatter 文本。
+
+        规则：首行须为 ``---``（允许前后空白），到下一个独占一行的 ``---`` 结束。
+        """
+        # 找到第一个 --- 行
+        m1 = _RE_FM_START.search(text)
+        if m1 is None:
+            return None
+        start = m1.end()
+        # 若 --- 不是文档首行（前面只有空白），仍接受；否则要求严格首行
+        prefix = text[: m1.start()]
+        if prefix.strip() != "":
+            return None
+        m2 = _RE_FM_START.search(text, start)
+        if m2 is None:
+            return None
+        return text[start : m2.start()]
+
+    @staticmethod
+    def _build_parsed(data: dict[str, Any], includes_bug: bool) -> ParsedProject:
+        """frontmatter dict -> ParsedProject。"""
+        proj = data.get("project") or {}
+        try:
+            modules = [
+                ParsedModule(id=str(m["id"]), name=str(m["name"]))
+                for m in (data.get("modules") or [])
+            ]
+            iterations: list[ParsedIteration] = []
+            for it in data.get("iterations") or []:
+                subitems: list[ParsedSubitem] = []
+                for s in it.get("subitems") or []:
+                    subitems.append(
+                        ParsedSubitem(
+                            seq=int(s["seq"]),
+                            content=str(s["content"]),
+                            status=RequirementStatus(s["status"]),
+                            completion_deadline=_opt_date(s.get("deadline")),
+                        )
+                    )
+                iterations.append(
+                    ParsedIteration(
+                        id=str(it["id"]),
+                        feature=str(it.get("feature", "")),
+                        modules=[str(x) for x in (it.get("modules") or [])],
+                        content=str(it.get("content", "")),
+                        status=RequirementStatus(it["status"]),
+                        date=_req_date(it.get("date")),
+                        completion_deadline=_opt_date(it.get("deadline")),
+                        created_at=_req_dt(it.get("created_at")),
+                        updated_at=_req_dt(it.get("updated_at")),
+                        subitems=subitems,
+                    )
+                )
+            bugs: list[ParsedBug] = []
+            for b in data.get("bugs") or []:
+                bugs.append(
+                    ParsedBug(
+                        id=str(b["id"]),
+                        content=str(b.get("content", "")),
+                        level=str(b.get("level", "P3")),
+                        status=str(b.get("status", "open")),
+                        modules=[str(x) for x in (b.get("modules") or [])],
+                        linked=str(b["linked"]) if b.get("linked") else None,
+                        date=_req_date(b.get("date")),
+                        created_at=_req_dt(b.get("created_at")),
+                        updated_at=_req_dt(b.get("updated_at")),
+                    )
+                )
+            return ParsedProject(
+                project_id=str(proj["id"]),
+                name=str(proj["name"]),
+                created_at=_req_dt(proj.get("created_at")),
+                updated_at=_req_dt(proj.get("updated_at")),
+                modules=modules,
+                iterations=iterations,
+                bugs=bugs,
+                includes_bug=includes_bug,
+            )
+        except (KeyError, ValueError, TypeError, ValidationError) as exc:
+            raise ImportParseError(f"frontmatter 结构非法: {exc}") from exc
+
+
+def _req_date(val: object) -> date:
+    """必填 date：接受 ISO 字符串或 date 对象。"""
+    if val is None:
+        raise ImportParseError("date 必填")
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, str):
+        return date.fromisoformat(val)
+    raise ImportParseError(f"非法 date: {val!r}")
+
+
+def _opt_date(val: object) -> date | None:
+    """可选 date：None 返回 None，否则解析。"""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    if isinstance(val, str):
+        return date.fromisoformat(val)
+    raise ImportParseError(f"非法 date: {val!r}")
+
+
+def _req_dt(val: object) -> datetime:
+    """必填 datetime：接受 ISO 字符串或 datetime/date 对象。"""
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, date):
+        return datetime(val.year, val.month, val.day)
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val)
+        except ValueError:
+            # YAML 可能解析为 date（无时间部分）
+            try:
+                d = date.fromisoformat(val)
+                return datetime(d.year, d.month, d.day)
+            except ValueError as exc:
+                raise ImportParseError(f"非法 datetime: {val!r}") from exc
+    raise ImportParseError(f"非法 datetime: {val!r}")
+
+
+def parse_import_md(text: str) -> ParsedProject:
+    """便捷函数：解析 .md 文本为 ParsedProject（新版双轨格式）。"""
+    return Importer().parse(text)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 旧版 .txt 宽松解析（v3 文本格式，保留向后兼容至第 7 步清理旧代码时移除）
+# ──────────────────────────────────────────────────────────────────────
+
+from management_prd.models.data import ParsedImport, ParsedRequirement  # noqa: E402
+from management_prd.models.requirement import (  # noqa: E402
     LABEL_TO_STATUS,
     STATUS_SECTION_KEYWORDS,
-    RequirementStatus,
 )
 
 # YYMMDD 世纪 pivot
@@ -94,27 +278,13 @@ class _SeenEntry:
         self.order = order
 
 
-class Importer:
-    """需求导入解析器。"""
+class _LegacyTxtImporter:
+    """旧版 .txt 宽松解析器（v3 文本格式）。"""
 
     def parse(self, text: str) -> ParsedImport:
-        """解析整段文本。
-
-        每个 ``(date, module, content)`` 产出一条 ParsedRequirement（``feature=content``）。
-        同 key 重复出现时按状态优先级合并（TODO/DEFERRED 段优先于默认 DONE），
-        并保留首次出现顺序。
-
-        Args:
-            text: .txt 文件全文。
-
-        Returns:
-            ParsedImport。
-        """
+        """解析整段文本为 ParsedImport（旧版）。"""
         lines = text.splitlines()
-        # 1. 分块
         blocks = self._split_blocks(lines)
-        # 2. 解析每个日期块，按 (date, module, content) 聚合（去重 + 状态优先级）
-        # v3：不再跨日期合并，每个 (date, module, content) 一条。
         seen: dict[tuple[date, str, str], _SeenEntry] = {}
         order = 0
         for block_lines in blocks:
@@ -132,7 +302,6 @@ class Importer:
                     if _STATUS_PRIORITY[status_hint] < _STATUS_PRIORITY[entry.status]:
                         entry.status = status_hint
 
-        # 3. 构造 ParsedRequirement 列表（按首次出现顺序）
         requirements: list[ParsedRequirement] = []
         for (block_date, module, content), entry in sorted(
             seen.items(), key=lambda kv: kv[1].order
@@ -152,26 +321,19 @@ class Importer:
     # ---------- 分块 ----------
 
     def _split_blocks(self, lines: list[str]) -> list[list[str]]:
-        """切分为原始块列表。
-
-        规则：日期行开新块；分隔行关当前块。块外的非日期内容被丢弃。
-        """
         blocks: list[list[str]] = []
         current: list[str] | None = None
         for raw in lines:
             line = raw.strip()
             if _RE_DATE.match(line):
-                # 日期行开新块
                 if current is not None:
                     blocks.append(current)
                 current = [line]
             elif is_separator(line):
-                # 分隔行关当前块
                 if current is not None:
                     blocks.append(current)
                     current = None
             else:
-                # 内容行：仅当块开着时收入
                 if current is not None:
                     current.append(raw)
         if current is not None:
@@ -184,12 +346,6 @@ class Importer:
         self,
         block_lines: list[str],
     ) -> tuple[date, list[tuple[str, str, RequirementStatus]]] | None:
-        """解析单个块。
-
-        Returns:
-            (date, [(module, content, status_hint), ...]) 或 None（非日期块）。
-        """
-        # 首个非空行须为日期
         first_idx = 0
         while first_idx < len(block_lines) and not block_lines[first_idx].strip():
             first_idx += 1
@@ -197,7 +353,7 @@ class Importer:
             return None
         first_line = block_lines[first_idx].strip()
         if not _RE_DATE.match(first_line):
-            return None  # 非日期块，丢弃
+            return None
         try:
             block_date = parse_yymmdd(first_line)
         except ImportParseError:
@@ -205,7 +361,6 @@ class Importer:
 
         points: list[tuple[str, str, RequirementStatus]] = []
         cur_module = ""
-        # 默认状态段外的点状态
         default_status = RequirementStatus.DONE
         cur_status_hint = default_status
 
@@ -215,14 +370,12 @@ class Importer:
             if not line:
                 continue
             if is_separator(line):
-                continue  # 块内残留分隔行忽略
+                continue
             if _RE_BARE_HASHES.match(line):
-                # 裸 ### -> 软分隔：重置模块，下一标题行开新模块
                 cur_module = ""
                 cur_status_hint = default_status
                 continue
 
-            # 剥离状态尾标
             content_after, tag_status = _strip_status_tag(line)
 
             m_md = _RE_MD_HEADER.match(content_after)
@@ -230,22 +383,18 @@ class Importer:
             m_num = _RE_NUMBERED.match(content_after)
 
             if m_letter is not None:
-                # 字母编号 A/B -> 模块标题
                 title = m_letter.group(2).strip()
                 cur_module = title
                 cur_status_hint = _status_for_module_title(title) or default_status
             elif m_md is not None:
-                # Markdown 标题 -> 模块标题
                 title = m_md.group(1).strip()
                 cur_module = title
                 cur_status_hint = _status_for_module_title(title) or default_status
             elif m_num is not None:
-                # 编号点 -> 需求项
                 content = m_num.group(2).strip()
                 status = tag_status if tag_status is not None else cur_status_hint
                 points.append((cur_module, content, status))
             else:
-                # 自由文本：若下一非空行是编号点则当模块标题，否则当独立需求项
                 if self._next_is_numbered(body, body.index(raw) + 1):
                     title = content_after.strip()
                     cur_module = title
@@ -259,7 +408,6 @@ class Importer:
 
     @staticmethod
     def _next_is_numbered(body: list[str], start: int) -> bool:
-        """从 start 开始，下一个非空非分隔行是否为编号点。"""
         for i in range(start, len(body)):
             line = body[i].strip()
             if not line or is_separator(line) or _RE_BARE_HASHES.match(line):
@@ -269,5 +417,8 @@ class Importer:
 
 
 def parse_import(text: str) -> ParsedImport:
-    """便捷函数：解析文本为 ParsedImport。"""
-    return Importer().parse(text)
+    """[旧版] 解析 .txt 文本为 ParsedImport。第 7 步清理时移除。
+
+    新版 .md 解析见 :func:`parse_import_md`。
+    """
+    return _LegacyTxtImporter().parse(text)

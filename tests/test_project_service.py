@@ -1291,3 +1291,96 @@ def test_todo_subitem_inherits_iter_deadline(service: ProjectService) -> None:
     reminders = service.list_todo_reminders(threshold_days=7, show_no_deadline=True)
     assert reminders == []
 
+
+
+# ---------- get_full_snapshot（导出快照） ----------
+
+
+def test_get_full_snapshot_roundtrip_shape(service: ProjectService) -> None:
+    """get_full_snapshot 装配完整快照：modules / iterations+subitems / bugs + 多对多关联，
+    所有引用用原始 DB id。"""
+    import yaml
+
+    from management_prd.models.bug import CreateBugInput
+    from management_prd.models.subitem import CreateSubitemInput
+    from management_prd.services.exporter import Exporter
+
+    p = service.create_project("快照项目")
+    item = service.create_requirement(
+        p.id,
+        CreateRequirementInput(
+            module_names=["主界面", "账户"],
+            feature="登录",
+            content="实现登录",
+            status=RequirementStatus.DONE,
+            date=date(2026, 1, 5),
+            completion_deadline=date(2026, 1, 10),
+        ),
+    )
+    service.create_subitem(
+        CreateSubitemInput(
+            iteration_id=item.id,
+            content="微信登录",
+            status=RequirementStatus.DONE,
+            completion_deadline=date(2026, 1, 8),
+        )
+    )
+    service.create_subitem(
+        CreateSubitemInput(
+            iteration_id=item.id,
+            content="手机验证码",
+            status=RequirementStatus.TODO,
+        )
+    )
+    # 建 bug 关联到上面的迭代
+    bug = service  # placeholder
+    from management_prd.services.bug_service import BugService
+
+    bug_service = BugService(service._db)
+    bug_service.create_bug(
+        p.id,
+        CreateBugInput(
+            module_names=["主界面"],
+            content="登录回调崩溃",
+            level="P1",
+            linked_iteration_id=item.id,
+            date=date(2026, 1, 6),
+        ),
+    )
+
+    snap = service.get_full_snapshot(p.id)
+    assert snap.name == "快照项目"
+    assert len(snap.modules) == 2  # 主界面、账户
+    assert {m.name for m in snap.modules} == {"主界面", "账户"}
+    assert len(snap.iterations) == 1
+    it = snap.iterations[0]
+    assert it.feature == "登录"
+    assert it.content == "实现登录"
+    assert it.status == RequirementStatus.DONE
+    assert it.completion_deadline == date(2026, 1, 10)
+    # 多模块 id 全部回填
+    assert len(it.modules) == 2
+    assert set(it.modules) == {m.id for m in snap.modules}
+    # 子需求
+    assert len(it.subitems) == 2
+    assert it.subitems[0].content == "微信登录"
+    assert it.subitems[0].completion_deadline == date(2026, 1, 8)
+    assert it.subitems[1].content == "手机验证码"
+    assert it.subitems[1].completion_deadline is None
+    # bug
+    assert len(snap.bugs) == 1
+    b = snap.bugs[0]
+    assert b.content == "登录回调崩溃"
+    assert b.level == "P1"
+    assert b.linked == item.id  # 原始 id
+    assert b.modules == [m.id for m in snap.modules if m.name == "主界面"]
+
+    # 导出可解析为合法 YAML frontmatter
+    text = Exporter().export(snap, include_bug=True)
+    fm = yaml.safe_load(text.split("---\n")[1])
+    assert fm["format_version"] == 1
+    assert fm["includes_bug"] is True
+    assert fm["project"]["name"] == "快照项目"
+    assert len(fm["iterations"]) == 1
+    assert len(fm["bugs"]) == 1
+    assert fm["bugs"][0]["linked"] == item.id

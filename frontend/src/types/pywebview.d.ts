@@ -99,6 +99,11 @@ export interface PyWebViewApi {
     requirements: ParsedRequirement[],
   ): Promise<Project | ApiErrorEnvelope>
   export_project(project_id: string): Promise<string | null | ApiErrorEnvelope>
+  /** 导出项目为 .md 双轨格式（frontmatter + 正文）。 */
+  export_project_md(
+    project_id: string,
+    include_bug: boolean,
+  ): Promise<string | null | ApiErrorEnvelope>
 
   // ── 存储位置 ──
   get_storage_info(): Promise<StorageInfo | ApiErrorEnvelope>

@@ -7,6 +7,7 @@ import { useRequirementsStore } from '@/stores/requirements'
 import type { RequirementStatus } from '@/types'
 import { STATUS_LABEL } from '@/types/requirement'
 import RequirementEditDialog from '@/components/RequirementEditDialog.vue'
+import ExportDialog from '@/components/ExportDialog.vue'
 import { IPixelDownload, IPixelPlus } from '@/constants/icons'
 import { ref } from 'vue'
 
@@ -14,6 +15,7 @@ const store = useRequirementsStore()
 const { filters, project } = storeToRefs(store)
 
 const editVisible = ref(false)
+const exportDialogRef = ref<InstanceType<typeof ExportDialog> | null>(null)
 
 const statusOptions: { value: RequirementStatus; label: string }[] = [
   { value: 'todo', label: STATUS_LABEL.todo },
@@ -53,12 +55,7 @@ async function onExport() {
     ElMessage.warning('请先选择项目')
     return
   }
-  try {
-    const path = await store.exportCurrent()
-    if (path) ElMessage.success(`已导出：${path}`)
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : '导出失败')
-  }
+  exportDialogRef.value?.open()
 }
 </script>
 
@@ -103,6 +100,7 @@ async function onExport() {
     </el-button>
 
     <RequirementEditDialog v-model="editVisible" mode="create" />
+    <ExportDialog ref="exportDialogRef" />
   </div>
 </template>
 
