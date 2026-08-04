@@ -23,6 +23,12 @@ export interface AppSettings {
   settings_order: string[]
   /** 待办提醒：剩余天数阈值（含逾期）。仅剩余天数≤该值且未完成的需求进入待办 */
   reminder_threshold_days: number
+  /** 待办提醒：紧急阈值（天）。剩余天数≤该值的聚合标题栏用紧急警告色 */
+  urgent_threshold_days: number
+  /** 待办提醒：当前提醒阈值内聚合标题栏的警告色（橙） */
+  reminder_warning_color: string
+  /** 待办提醒：紧急阈值内聚合标题栏的警告色（深红） */
+  urgent_warning_color: string
   /** 无完成时限的未完成需求是否常驻待办列表 */
   show_no_deadline_in_todo: boolean
   /** 树形功能节点是否显示子需求进度 (done/total)；关则仅功能详情页显示 */

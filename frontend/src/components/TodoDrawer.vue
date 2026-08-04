@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { IPixelReload } from '@/constants/icons'
 
 import { useTodoStore } from '@/stores/todo'
+import { useSettingsStore } from '@/stores/settings'
 import { STATUS_LABEL, STATUS_TAG_TYPE } from '@/types/requirement'
 import { formatDate } from '@/utils'
 import type { TodoReminder } from '@/types'
@@ -16,6 +17,11 @@ const emit = defineEmits<{
 
 const todoStore = useTodoStore()
 const { reminders, loading } = storeToRefs(todoStore)
+
+// 警告色设置：用于给聚合标题栏着色（紧急阈值内深红、提醒阈值内橙）
+const settingsStore = useSettingsStore()
+const { urgentThresholdDays, reminderThresholdDays, reminderWarningColor, urgentWarningColor } =
+  storeToRefs(settingsStore)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -72,6 +78,32 @@ watch(
   { immediate: true },
 )
 
+/**
+ * 聚合标题栏着色：仅「已逾期」与「剩余 N 天」两组参与，按剩余天数与阈值判定。
+ * - overdue（remaining<0）始终用紧急警告色；
+ * - remaining-N：N ≤ 紧急阈值 -> 紧急警告色；N ≤ 提醒阈值 -> 提醒警告色；
+ * - 无时限 / 远期规划不着色（用默认浅灰）。
+ * 通过设置 el-collapse 的 CSS 变量实现单组背景/文字色覆盖。
+ */
+function groupHeaderStyle(g: TodoGroup): Record<string, string> {
+  let bg: string | null = null
+  if (g.key === 'overdue') {
+    bg = urgentWarningColor.value
+  } else if (g.key.startsWith('remaining-')) {
+    const n = Number(g.key.slice('remaining-'.length))
+    if (n <= urgentThresholdDays.value) {
+      bg = urgentWarningColor.value
+    } else if (n <= reminderThresholdDays.value) {
+      bg = reminderWarningColor.value
+    }
+  }
+  if (!bg) return {}
+  return {
+    '--el-collapse-header-bg-color': bg,
+    '--el-collapse-header-text-color': '#ffffff',
+  }
+}
+
 function onRefresh() {
   void todoStore.load()
 }
@@ -108,6 +140,7 @@ function onClickItem(item: TodoReminder) {
           :key="g.key"
           :name="g.key"
           :title="`${g.label} (${g.items.length})`"
+          :style="groupHeaderStyle(g)"
         >
           <div
             v-for="item in g.items"
@@ -157,12 +190,13 @@ function onClickItem(item: TodoReminder) {
   --el-collapse-border-color: #e5e7eb;
   --el-collapse-header-height: 44px;
   --el-collapse-header-bg-color: #f9fafb;
+  --el-collapse-header-text-color: #374151;
   --el-collapse-content-bg-color: #ffffff;
 }
 .group-list :deep(.el-collapse-item__header) {
   font-weight: 600;
   font-size: 14px;
-  color: #374151;
+  color: var(--el-collapse-header-text-color);
   padding: 0 12px;
 }
 .group-list :deep(.el-collapse-item__content) {

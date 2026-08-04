@@ -94,10 +94,15 @@ function onOpenTodo() {
 .menu-item {
   color: #cbd5e1;
   height: 56px;
-  line-height: 56px;
   width: 64px;
-  text-align: center;
+  display: flex; /* flex 居中，避免 el-icon(inline-flex) baseline 对齐导致图标偏上 */
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+}
+/* 菜单栏宽度 64px 不变，单独放大图标以提升可点击感与可读性 */
+.menu-item :deep(.el-icon) {
+  font-size: 24px;
 }
 .menu-item:hover {
   background: #374151;

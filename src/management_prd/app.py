@@ -23,6 +23,7 @@ from management_prd.services.db_service import DbService
 from management_prd.services.module_service import ModuleService
 from management_prd.services.project_service import ProjectService
 from management_prd.services.settings_service import SettingsService
+from management_prd.single_instance import ensure_single_instance
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,10 @@ def run(dev: bool = False) -> int:
         level=logging.DEBUG if dev else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    # 单实例锁：已有实例在运行则提示并退出，避免并发写库 / 双窗口
+    if not ensure_single_instance():
+        return 0
 
     try:
         db = DbService()

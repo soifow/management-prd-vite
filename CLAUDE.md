@@ -150,3 +150,13 @@ v4 迁移（`_migrate_v4`）在测试时暴露两个非显然缺陷，均已修�
   - **修复**：v3 分支用 `PRAGMA table_info(requirements)` 检测「requirements 是否带 module 列」——有才进 v3 主体（真老库），否则跳过（全新库无 `status='bug'` 行待迁、bugs 已就绪）。bugs 若缺 module 列则 `ALTER TABLE bugs ADD COLUMN module TEXT NOT NULL DEFAULT ''` 补上（承接迁移的 bug 行，v4 会重建去掉）。v4 分支同样 `if "module" not in req_cols: return` 早退。
 - **How to apply（新增迁移分支）**：① 任何在迁移里 `DROP TABLE`（重建）的，**必须**外层先 commit + `foreign_keys=OFF`，否则 CASCADE 清空关联表。② 任何引用「旧列」的迁移 SQL（SELECT/INDEX/INSERT 列），**必须**先用 `PRAGMA table_info` 探测该列存在再执行——因为 `init_db` 顶部把所有表建成最新结构，老库的旧表虽保留（`IF NOT EXISTS` no-op），但全新库的表是最新结构、无旧列，跨版本分支会在全新库上跑。
 
+### 单实例锁（2026-08-03）
+
+禁止同时运行多个本程序实例，避免并发写库 / 双窗口。实现于 `src/management_prd/single_instance.py`，由 `app.run()` 在 logging 配置后、`DbService.init_db()` 前调用 `ensure_single_instance()`。
+
+- **Windows 命名互斥量**：`kernel32.CreateMutexW(None, False, "ManagementPrdVite_SingleInstance")`，若 `GetLastError() == ERROR_ALREADY_EXISTS(183)` 视为已有实例，返回 None，当前实例**静默退出**（不弹窗，避免打扰用户；退出码 0）。互斥量句柄存模块级 `_single_instance_handle` 持续持有，避免 GC 释放；进程崩溃 OS 自动释放，无残留。
+- **非 Windows 默认放行**：`sys.platform != 'win32'` 直接 return True，避免跨平台 API 差异在 CI/测试环境崩溃。如需支持 macOS/Linux，再加 `flock`/`fcntl` 锁定用户数据目录下 lock 文件。
+- **开发调试逃生口**：环境变量 `MANAGEMENT_PRD_ALLOW_MULTI_INSTANCE=1` 跳过锁定（开多个实例做 HMR 联调）。**Why**：dev 模式下前端 Vite HMR 与后端有时需多开窗口对照；生产打包后该环境变量通常不存在。
+- **How to apply**：未来如改应用名/区分不同安装目录，改 `_SINGLE_INSTANCE_MUTEX_NAME`；测试见 `tests/test_single_instance.py`（两子进程竞争同一互斥量名验证第二实例检测到 EXISTS；`monkeypatch sys.platform='linux'` 验证非 Windows 放行；env 逃生口验证）。Python 3.14 下 subprocess pipe finalization 会抛 `PytestUnraisableExceptionWarning`，该用例用 `@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")` 过滤——是测试 harness 噪声非功能 bug。
+
+

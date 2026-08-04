@@ -19,6 +19,12 @@ export const useSettingsStore = defineStore('settings', () => {
   const settingsOrder = ref<string[]>(['storage', 'display'])
   // 待办提醒：剩余天数阈值（含逾期）
   const reminderThresholdDays = ref(7)
+  // 待办提醒：紧急阈值（剩余天数≤该值的聚合标题栏用紧急警告色）
+  const urgentThresholdDays = ref(3)
+  // 待办提醒：当前提醒阈值内聚合标题栏警告色（橙）
+  const reminderWarningColor = ref('#eb9f24')
+  // 待办提醒：紧急阈值内聚合标题栏警告色（深红）
+  const urgentWarningColor = ref('#dc2626')
   // 待办提醒：无时限需求是否常驻待办列表
   const showNoDeadlineInTodo = ref(true)
   // 树形功能节点是否显示子需求进度 (done/total)
@@ -41,8 +47,11 @@ export const useSettingsStore = defineStore('settings', () => {
     settingsOrder.value =
       settings.settings_order && settings.settings_order.length > 0
         ? settings.settings_order
-        : ['storage', 'display']
+        : ['storage', 'display', 'reminder', 'subitem']
     reminderThresholdDays.value = settings.reminder_threshold_days
+    urgentThresholdDays.value = settings.urgent_threshold_days
+    reminderWarningColor.value = settings.reminder_warning_color
+    urgentWarningColor.value = settings.urgent_warning_color
     showNoDeadlineInTodo.value = settings.show_no_deadline_in_todo
     showSubitemProgressInTree.value = settings.show_subitem_progress_in_tree
   }
@@ -69,13 +78,25 @@ export const useSettingsStore = defineStore('settings', () => {
     settingsOrder.value = settings.settings_order
   }
 
-  /** 修改待办提醒设置并落盘（阈值 + 无时限常驻开关）。 */
-  async function saveReminderSettings(threshold: number, showNoDeadline: boolean) {
+  /** 修改待办提醒设置并落盘（阈值 + 紧急阈值 + 警告色 + 无时限常驻开关）。 */
+  async function saveReminderSettings(
+    threshold: number,
+    urgentThreshold: number,
+    reminderColor: string,
+    urgentColor: string,
+    showNoDeadline: boolean,
+  ) {
     const settings = await updateSettings({
       reminder_threshold_days: threshold,
+      urgent_threshold_days: urgentThreshold,
+      reminder_warning_color: reminderColor,
+      urgent_warning_color: urgentColor,
       show_no_deadline_in_todo: showNoDeadline,
     })
     reminderThresholdDays.value = settings.reminder_threshold_days
+    urgentThresholdDays.value = settings.urgent_threshold_days
+    reminderWarningColor.value = settings.reminder_warning_color
+    urgentWarningColor.value = settings.urgent_warning_color
     showNoDeadlineInTodo.value = settings.show_no_deadline_in_todo
   }
 
@@ -116,6 +137,9 @@ export const useSettingsStore = defineStore('settings', () => {
     projectListDateMode,
     settingsOrder,
     reminderThresholdDays,
+    urgentThresholdDays,
+    reminderWarningColor,
+    urgentWarningColor,
     showNoDeadlineInTodo,
     showSubitemProgressInTree,
     loadStorageInfo,

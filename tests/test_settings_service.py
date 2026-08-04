@@ -22,6 +22,9 @@ def test_load_returns_default_when_missing(bootstrap: BootstrapService) -> None:
     assert settings.project_list_date_mode == "latest_any"
     assert settings.settings_order == ["storage", "display", "reminder", "subitem"]
     assert settings.reminder_threshold_days == 7
+    assert settings.urgent_threshold_days == 3
+    assert settings.reminder_warning_color == "#eb9f24"
+    assert settings.urgent_warning_color == "#dc2626"
     assert settings.show_no_deadline_in_todo is True
     assert settings.show_subitem_progress_in_tree is False
 
@@ -58,6 +61,9 @@ def test_get_settings_dict(bootstrap: BootstrapService) -> None:
         "project_list_date_mode": "latest_any",
         "settings_order": ["storage", "display", "reminder", "subitem"],
         "reminder_threshold_days": 7,
+        "urgent_threshold_days": 3,
+        "reminder_warning_color": "#eb9f24",
+        "urgent_warning_color": "#dc2626",
         "show_no_deadline_in_todo": True,
         "show_subitem_progress_in_tree": False,
     }
@@ -113,3 +119,59 @@ def test_settings_resolve_storage_dir_each_call(
     new_dir.mkdir()
     bootstrap.write_storage_dir(str(new_dir))
     assert svc.path == new_dir / "settings.json"
+
+
+def test_reminder_warning_settings_update(bootstrap: BootstrapService) -> None:
+    """提醒阈值/紧急阈值/警告色均可独立更新并落盘。"""
+    svc = SettingsService(bootstrap=bootstrap)
+    updated = svc.update_settings(
+        {
+            "reminder_threshold_days": 10,
+            "urgent_threshold_days": 2,
+            "reminder_warning_color": "#ea580c",
+            "urgent_warning_color": "#b91c1c",
+        }
+    )
+    assert updated.reminder_threshold_days == 10
+    assert updated.urgent_threshold_days == 2
+    assert updated.reminder_warning_color == "#ea580c"
+    assert updated.urgent_warning_color == "#b91c1c"
+    reloaded = SettingsService(bootstrap=bootstrap).load()
+    assert reloaded.reminder_threshold_days == 10
+    assert reloaded.urgent_threshold_days == 2
+    assert reloaded.reminder_warning_color == "#ea580c"
+    assert reloaded.urgent_warning_color == "#b91c1c"
+
+
+def test_urgent_threshold_greater_than_reminder_rejected(bootstrap: BootstrapService) -> None:
+    """紧急阈值超过提醒阈值应被拒绝（无区分效果）。"""
+    svc = SettingsService(bootstrap=bootstrap)
+    svc.update_settings({"reminder_threshold_days": 5})
+    with pytest.raises(ValueError):
+        svc.update_settings({"urgent_threshold_days": 6})
+
+
+def test_urgent_threshold_equal_to_reminder_allowed(bootstrap: BootstrapService) -> None:
+    """紧急阈值等于提醒阈值允许（此时所有纳入项都用紧急色）。"""
+    svc = SettingsService(bootstrap=bootstrap)
+    svc.update_settings({"reminder_threshold_days": 5, "urgent_threshold_days": 5})
+    assert SettingsService(bootstrap=bootstrap).load().urgent_threshold_days == 5
+
+
+def test_partial_update_preserves_reminder_warning_fields(bootstrap: BootstrapService) -> None:
+    """部分更新其它字段不应丢失提醒/警告色设置。"""
+    svc = SettingsService(bootstrap=bootstrap)
+    svc.update_settings(
+        {
+            "reminder_threshold_days": 8,
+            "urgent_threshold_days": 1,
+            "reminder_warning_color": "#ff8800",
+            "urgent_warning_color": "#ff0000",
+        }
+    )
+    updated = svc.update_settings({"default_view_mode": "module"})
+    assert updated.default_view_mode == "module"
+    assert updated.reminder_threshold_days == 8
+    assert updated.urgent_threshold_days == 1
+    assert updated.reminder_warning_color == "#ff8800"
+    assert updated.urgent_warning_color == "#ff0000"

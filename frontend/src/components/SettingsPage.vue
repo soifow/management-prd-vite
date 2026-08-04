@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { IPixelFolder, IPixelSortVertical } from '@/constants/icons'
 
 import { useSettingsStore } from '@/stores/settings'
 import { whenReady } from '@/api'
+import { moveKey, normalizeOrder } from '@/utils/settingsOrder'
 import type { ProjectListDateMode, ViewMode } from '@/types/settings'
 
 const emit = defineEmits<{
@@ -23,6 +24,8 @@ const GROUPS = [
   { key: 'reminder', label: '提醒设置' },
   { key: 'subitem', label: '子需求进度' },
 ] as const
+// 全部已注册分组的 key（规范化顺序与拖拽重排的合法集合；新增分组自动纳入）
+const GROUP_KEYS = GROUPS.map((g) => g.key)
 
 // 项目列表「最新」日期口径下拉选项：value/label/desc，desc 随选中项联动显示
 const DATE_MODE_OPTIONS: { value: ProjectListDateMode; label: string; desc: string }[] = [
@@ -51,12 +54,23 @@ const dragOverKey = ref<string | null>(null)
 
 // 提醒设置草稿（保存时一并落盘）
 const draftThreshold = ref(settingsStore.reminderThresholdDays)
+const draftUrgentThreshold = ref(settingsStore.urgentThresholdDays)
+const draftReminderColor = ref(settingsStore.reminderWarningColor)
+const draftUrgentColor = ref(settingsStore.urgentWarningColor)
 const draftShowNoDeadline = ref(settingsStore.showNoDeadlineInTodo)
 // 子需求进度草稿
 const draftShowSubitemProgress = ref(settingsStore.showSubitemProgressInTree)
 
 // 项目列表日期口径草稿（保存时一并落盘）
 const draftProjectListDateMode = ref<ProjectListDateMode>(settingsStore.projectListDateMode)
+
+// 紧急阈值必定 ≤ 提醒阈值：当提醒阈值被下调到低于当前紧急阈值时，
+// 自动把紧急阈值对齐到提醒阈值（后端校验器同样拒绝前者 > 后者）。
+watch(draftThreshold, (t) => {
+  if (draftUrgentThreshold.value > t) {
+    draftUrgentThreshold.value = t
+  }
+})
 
 // 当前选中口径的说明文字（随下拉选项联动）
 const dateModeDesc = computed(
@@ -66,16 +80,10 @@ const dateModeDesc = computed(
 // 实际用于渲染的顺序：编辑态用草稿，非编辑态用已落盘值
 const activeOrder = computed(() => (editingOrder.value ? draftOrder.value : settingsOrder.value))
 
-// 按 activeOrder 排序的分组（容错：过滤未知 key、补齐缺失 key）
-const sortedGroups = computed(() => {
-  const validKeys = new Set<string>(GROUPS.map((g) => g.key))
-  const ordered = activeOrder.value
-    .filter((k) => validKeys.has(k))
-    .map((k) => GROUPS.find((g) => g.key === k)!)
-  const seen = new Set(ordered.map((g) => g.key))
-  const missing = GROUPS.filter((g) => !seen.has(g.key))
-  return [...ordered, ...missing]
-})
+// 按 activeOrder 排序的分组（规范化：过滤未知 key、补齐缺失 key）
+const sortedGroups = computed(() =>
+  normalizeOrder(activeOrder.value, GROUP_KEYS).map((k) => GROUPS.find((g) => g.key === k)!),
+)
 
 const activeKey = ref<string>(GROUPS[0].key)
 const scrollRef = useTemplateRef<HTMLDivElement>('scrollRef')
@@ -119,8 +127,10 @@ function onToggleOrder() {
     finishOrderEdit()
     return
   }
-  // 进入编辑态：用当前已落盘顺序初始化草稿
-  draftOrder.value = [...settingsOrder.value]
+  // 进入编辑态：用当前已落盘顺序初始化草稿，并规范化补齐全部分组 key。
+  // 关键：旧版本持久化的 settings_order 可能只含部分 key，若不补齐，缺失的
+  // 分组虽能渲染但 draftOrder.indexOf() 返回 -1，导致 onDrop 静默失败无法重排。
+  draftOrder.value = normalizeOrder([...settingsOrder.value], GROUP_KEYS)
   editingOrder.value = true
 }
 
@@ -155,13 +165,9 @@ function onDrop(key: string, e: DragEvent) {
     return
   }
   e.preventDefault()
-  const from = draftOrder.value.indexOf(dragKey.value)
-  const to = draftOrder.value.indexOf(key)
-  if (from === -1 || to === -1) return
-  const next = [...draftOrder.value]
-  next.splice(from, 1)
-  next.splice(to, 0, dragKey.value)
-  draftOrder.value = next
+  // 经 normalizeOrder 保证 draftOrder 始终包含 GROUP_KEYS 全部 key，
+  // 因此缺失 key 导致 onDrop 失败的场景不再出现。
+  draftOrder.value = moveKey(draftOrder.value, dragKey.value, key)
   dragKey.value = null
   dragOverKey.value = null
 }
@@ -195,7 +201,13 @@ async function onSave() {
   try {
     await settingsStore.saveDefaultViewMode(defaultViewMode.value as ViewMode)
     await settingsStore.saveProjectListDateMode(draftProjectListDateMode.value)
-    await settingsStore.saveReminderSettings(draftThreshold.value, draftShowNoDeadline.value)
+    await settingsStore.saveReminderSettings(
+      draftThreshold.value,
+      draftUrgentThreshold.value,
+      draftReminderColor.value,
+      draftUrgentColor.value,
+      draftShowNoDeadline.value,
+    )
     await settingsStore.saveSubitemProgressInTree(draftShowSubitemProgress.value)
     emit('save')
   } catch (e) {
@@ -306,7 +318,7 @@ async function onSave() {
           <template v-else-if="g.key === 'reminder'">
             <h3 class="section-title">提醒设置</h3>
             <p class="section-desc">
-              启动时待办提醒抽屉中只显示「剩余天数 ≤ 阈值」且未完成的需求；「已逾期」始终置顶，状态为「暂缓」的项目不受阈值影响并始终显示在「远期规划」组。
+              启动时待办提醒抽屉中只显示「剩余天数 ≤ 提醒阈值」且未完成的需求；「已逾期」始终置顶，状态为「暂缓」的项目不受阈值影响并始终显示在「远期规划」组。紧急阈值内的聚合标题栏用深红色背景，提醒阈值内的用橙色背景。
             </p>
             <el-form label-position="top">
               <el-form-item label="提醒阈值（天）">
@@ -318,6 +330,24 @@ async function onSave() {
                   style="width: 160px"
                 />
                 <span class="field-hint">仅剩余天数 ≤ 该值（且未完成）进入待办；0 表示只显示已逾期</span>
+              </el-form-item>
+              <el-form-item label="紧急阈值（天）">
+                <el-input-number
+                  v-model="draftUrgentThreshold"
+                  :min="0"
+                  :max="draftThreshold"
+                  :step="1"
+                  style="width: 160px"
+                />
+                <span class="field-hint">剩余天数 ≤ 该值的聚合标题栏用紧急警告色；应 ≤ 提醒阈值</span>
+              </el-form-item>
+              <el-form-item label="提醒警告色">
+                <el-color-picker v-model="draftReminderColor" :show-alpha="false" />
+                <span class="field-hint">提醒阈值内聚合标题栏的背景色</span>
+              </el-form-item>
+              <el-form-item label="紧急警告色">
+                <el-color-picker v-model="draftUrgentColor" :show-alpha="false" />
+                <span class="field-hint">紧急阈值内聚合标题栏的背景色</span>
               </el-form-item>
               <el-form-item label="无时限需求">
                 <el-switch v-model="draftShowNoDeadline" />
