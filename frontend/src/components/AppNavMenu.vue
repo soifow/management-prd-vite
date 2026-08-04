@@ -8,6 +8,7 @@ import {
   IPixelBell,
   IPixelBellOff,
   IPixelDebug,
+  IPixelInfoBox,
   IPixelSettings,
 } from '@/constants/icons'
 
@@ -15,6 +16,7 @@ defineProps<{ activeKey: 'workspace' | 'settings' | 'bug' }>()
 const emit = defineEmits<{
   (e: 'select', key: 'workspace' | 'settings' | 'bug'): void
   (e: 'open-todo'): void
+  (e: 'open-about'): void
 }>()
 
 // 待办列表非空 -> 亮铃铛；为空 -> 静音铃铛。
@@ -34,6 +36,9 @@ function onSelectSettings() {
 }
 function onOpenTodo() {
   emit('open-todo')
+}
+function onOpenAbout() {
+  emit('open-about')
 }
 </script>
 
@@ -68,6 +73,13 @@ function onOpenTodo() {
     </el-tooltip>
 
     <div class="spacer" />
+
+    <!-- 底部：信息（项目简介弹窗，非视图，不高亮） -->
+    <el-tooltip content="关于" placement="right">
+      <div class="menu-item" @click="onOpenAbout">
+        <el-icon><IPixelInfoBox /></el-icon>
+      </div>
+    </el-tooltip>
 
     <!-- 底部：设置 -->
     <el-tooltip content="设置" placement="right">

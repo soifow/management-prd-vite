@@ -10,6 +10,7 @@ import IPixelDebug from '~icons/pixelarticons/debug'
 import IPixelDownload from '~icons/pixelarticons/download'
 import IPixelFolder from '~icons/pixelarticons/folder'
 import IPixelFolderPlus from '~icons/pixelarticons/folder-plus'
+import IPixelInfoBox from '~icons/pixelarticons/info-box'
 import IPixelPencil from '~icons/pixelarticons/pencil'
 import IPixelPlus from '~icons/pixelarticons/plus'
 import IPixelReload from '~icons/pixelarticons/reload'
@@ -26,6 +27,7 @@ export {
   IPixelDownload,
   IPixelFolder,
   IPixelFolderPlus,
+  IPixelInfoBox,
   IPixelPencil,
   IPixelPlus,
   IPixelReload,

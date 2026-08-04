@@ -18,6 +18,7 @@ import FeatureDetail from '@/components/FeatureDetail.vue'
 import SettingsPage from '@/components/SettingsPage.vue'
 import BugPage from '@/components/BugPage.vue'
 import TodoDrawer from '@/components/TodoDrawer.vue'
+import AboutDialog from '@/components/AboutDialog.vue'
 import type { BugLinkInfo, TodoReminder } from '@/types'
 
 const projectsStore = useProjectsStore()
@@ -33,6 +34,9 @@ const currentView = ref<'workspace' | 'bug' | 'settings'>('workspace')
 
 /** 待办抽屉显隐：启动后自动打开 */
 const todoVisible = ref(false)
+
+/** 关于弹窗显隐 */
+const aboutVisible = ref(false)
 
 /**
  * 跨项目跳转守卫：true 时跳过 activeProjectId watch 触发的 loadProject。
@@ -110,6 +114,11 @@ async function onOpenTodo() {
   }
 }
 
+/** 打开关于弹窗 */
+function onOpenAbout() {
+  aboutVisible.value = true
+}
+
 /**
  * 点击待办条目：关闭抽屉、跨项目跳转、打开功能、选中迭代。
  * 用 suppressProjectLoad 守卫避免被 activeProjectId watch 打断。
@@ -133,7 +142,12 @@ async function onJumpToItem(item: TodoReminder) {
 
 <template>
   <el-container class="layout">
-    <AppNavMenu :active-key="currentView" @select="onNavSelect" @open-todo="onOpenTodo" />
+    <AppNavMenu
+      :active-key="currentView"
+      @select="onNavSelect"
+      @open-todo="onOpenTodo"
+      @open-about="onOpenAbout"
+    />
 
     <!--
       三个视图常驻、用 v-show 切显隐（而非 v-if 互斥渲染）：
@@ -164,6 +178,7 @@ async function onJumpToItem(item: TodoReminder) {
     </div>
 
     <TodoDrawer v-model="todoVisible" @jump="onJumpToItem" />
+    <AboutDialog v-model="aboutVisible" />
   </el-container>
 </template>
 

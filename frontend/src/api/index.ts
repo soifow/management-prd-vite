@@ -227,3 +227,28 @@ export const getSettings = (): Promise<AppSettings> => invoke(() => bridge().get
 
 export const updateSettings = (patch: Partial<AppSettings>): Promise<AppSettings> =>
   invoke(() => bridge().update_settings(patch))
+
+// ── 系统 ─────────────────────────────────────────────────
+
+/** 用系统默认浏览器打开外部链接（避免在 webview 内导航）。 */
+export const openExternalUrl = (url: string): Promise<boolean> =>
+  invoke(() => bridge().open_external_url(url))
+
+/** 关于弹窗头像缓存（图片 B）。 */
+export interface CachedAvatar {
+  exists: true
+  /** 形如 `data:image/jpeg;base64,...`，可直接用于 `<img src>`。 */
+  data: string
+}
+export interface AvatarMissing {
+  exists: false
+}
+export type AvatarInfo = CachedAvatar | AvatarMissing
+
+/** 读取缓存的最新头像（用户访问过仓库后才有）。 */
+export const getAvatar = (): Promise<AvatarInfo> => invoke(() => bridge().get_avatar())
+
+/** 拉取作者 GitHub 最新头像写入 storage_dir/avatar.jpg（图片 B）。
+ * 失败返回 ``{updated:false,reason:"..."}``，不抛错。 */
+export const refreshAvatar = (): Promise<{ updated: boolean; reason?: string }> =>
+  invoke(() => bridge().refresh_avatar())

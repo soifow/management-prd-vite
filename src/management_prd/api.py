@@ -406,6 +406,89 @@ class WebApi:
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
+    # ---------- 系统 ----------
+
+    def open_external_url(self, url: str) -> object:
+        """用系统默认浏览器打开外部链接（如 GitHub 仓库），避免在 webview 内导航。"""
+        try:
+            import webbrowser
+
+            if not isinstance(url, str) or not url:
+                raise ValueError("url 必填")
+            if not url.startswith(("http://", "https://")):
+                raise ValueError("仅支持 http/https 链接")
+            webbrowser.open(url)
+            return True
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    # 关于弹窗头像：「打包默认（A）」 + 「访问仓库后缓存的最新版（B）」。
+    # 路径：storage_dir/avatar.jpg。storage_dir 可被用户迁移，缓存随迁。
+    AUTHOR_GITHUB_USER = "soifow"
+    AUTHOR_AVATAR_URL = f"https://github.com/{AUTHOR_GITHUB_USER}.png?size=128"
+    _AVATAR_FILENAME = "avatar.jpg"
+    _AVATAR_TIMEOUT = 5  # 秒；超时即放弃，避免拖慢 UI
+
+    def _avatar_path(self) -> Path:
+        """头像 B 缓存路径。"""
+        return self._db.storage_dir / self._AVATAR_FILENAME
+
+    def get_avatar(self) -> object:
+        """读取缓存的最新头像（图片 B）。
+
+        Returns:
+            ``{"exists": False}``：未访问过仓库或下载失败。
+            ``{"exists": True, "data": "data:image/jpeg;base64,..."}``：已缓存。
+        """
+        try:
+            path = self._avatar_path()
+            if not path.exists():
+                return {"exists": False}
+            import base64
+
+            data = path.read_bytes()
+            if not data:
+                return {"exists": False}
+            b64 = base64.b64encode(data).decode("ascii")
+            return {"exists": True, "data": f"data:image/jpeg;base64,{b64}"}
+        except (ManagementPrdError, ValueError, OSError) as exc:
+            return _err(exc)
+
+    def refresh_avatar(self) -> object:
+        """从作者 GitHub 拉取最新头像写入 storage_dir/avatar.jpg（图片 B）。
+
+        失败不影响主流程：网络抖动时返回 ``{"updated": False, "reason": "..."}``。
+        永远不会删除已存在的 B——只在成功拿到新数据时覆盖。
+        """
+        import urllib.error
+        import urllib.request
+
+        try:
+            req = urllib.request.Request(
+                self.AUTHOR_AVATAR_URL,
+                headers={"User-Agent": "management-prd-vite"},
+            )
+            with urllib.request.urlopen(req, timeout=self._AVATAR_TIMEOUT) as resp:
+                data = resp.read()
+            if not data:
+                return {"updated": False, "reason": "empty response"}
+
+            path = self._avatar_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # 临时文件 + 原子替换：避免写入半截文件污染缓存
+            import os
+
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_bytes(data)
+            os.replace(tmp, path)
+            logger.info("头像已刷新: %s (%d bytes)", path, len(data))
+            return {"updated": True}
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            # 软失败：返回 updated=False，不抛错、不弹错误
+            return {"updated": False, "reason": str(exc)}
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
     # ---------- 内部工具 ----------
 
     @staticmethod

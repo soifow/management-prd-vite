@@ -108,6 +108,19 @@ export interface PyWebViewApi {
   // ── 设置 ──
   get_settings(): Promise<AppSettings | ApiErrorEnvelope>
   update_settings(patch: Partial<AppSettings>): Promise<AppSettings | ApiErrorEnvelope>
+
+  // ── 系统 ──
+  open_external_url(url: string): Promise<boolean | ApiErrorEnvelope>
+  get_avatar(): Promise<
+    | { exists: true; data: string }
+    | { exists: false }
+    | ApiErrorEnvelope
+  >
+  refresh_avatar(): Promise<
+    | { updated: true }
+    | { updated: false; reason: string }
+    | ApiErrorEnvelope
+  >
 }
 
 declare global {
