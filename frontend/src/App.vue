@@ -80,9 +80,17 @@ function onNavSelect(key: 'workspace' | 'bug' | 'settings') {
   currentView.value = key
 }
 
-/** 设置页保存：切回工作区 */
-function onSettingsSave() {
-  currentView.value = 'workspace'
+/**
+ * 设置页保存后：不切回工作区（停留在设置页，符合「保存即留页」预期），
+ * 仅刷新跨项目待办列表——待办阈值/「无时限常驻」开关变化后，铃铛与抽屉
+ * 需立即反映新口径。后端 get_todo_reminders 每次调用都重读设置，故重拉即可。
+ */
+async function onSettingsSave() {
+  try {
+    await todoStore.load()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '刷新待办失败')
+  }
 }
 
 /**
