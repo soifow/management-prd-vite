@@ -19,6 +19,7 @@ import {
   parseMdImport,
   setRequirementStatus,
   setSubitemStatus,
+  smartImport,
   updateRequirement,
   updateSubitem,
 } from '@/api'
@@ -291,6 +292,12 @@ export const useRequirementsStore = defineStore('requirements', () => {
     return await parseMdImport()
   }
 
+  /** 智能导入：弹文件框 -> 后端 LLM 结构化 -> ParsedProject（预览用）。取消返回 null。
+   *  智能导入数据无原始 ID，提交时 reuse_id=false；调用方在打开预览弹窗时由 mode 触发注入。 */
+  async function smartImportFile(): Promise<ParseMdResult | null> {
+    return await smartImport()
+  }
+
   /** 应用完整导入到目标项目（基础导入 target=project_id 或新建 name；reuse_id 由 parsed 携带）。 */
   async function applyFullImportTo(target: ImportTarget, parsed: ParsedProject) {
     const p = await applyFullImport(target, parsed)
@@ -345,6 +352,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     removeSubitem,
     parseImport,
     applyFullImportTo,
+    smartImportFile,
     exportCurrent,
     listFeatures,
   }

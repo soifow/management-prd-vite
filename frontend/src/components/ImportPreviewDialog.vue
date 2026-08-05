@@ -23,8 +23,8 @@ const parsed = ref<ParsedProject | null>(null)
 const activeModuleNames = ref<string[]>([])
 const defaultStatus = ref<RequirementStatus>('done')
 
-// 导入模式：current=导入当前项目；new=新建项目并导入
-const mode = ref<'current' | 'new'>('current')
+// 导入模式：current=导入当前项目；new=新建项目并导入；smart=智能导入（reuse_id=false）
+const mode = ref<'current' | 'new' | 'smart'>('current')
 const projectName = ref('')
 
 // 左侧树选中项（迭代或 bug）
@@ -33,9 +33,10 @@ type TreeNode =
   | { kind: 'bug'; data: ParsedBug }
 const selectedNode = ref<TreeNode | null>(null)
 
-const dialogTitle = computed(() =>
-  mode.value === 'new' ? '导入新建项目' : '导入当前项目',
-)
+const dialogTitle = computed(() => {
+  if (mode.value === 'smart') return '智能导入（LLM）'
+  return mode.value === 'new' ? '导入新建项目' : '导入当前项目'
+})
 
 // ── 统计 ──
 
@@ -145,7 +146,7 @@ const statusOptions: RequirementStatus[] = [
 
 function open(
   p: ParsedProject,
-  m: 'current' | 'new' = 'current',
+  m: 'current' | 'new' | 'smart' = 'current',
   filename = '',
 ) {
   parsed.value = structuredClone(p)
@@ -216,13 +217,17 @@ async function onApply() {
     ElMessage.warning('项目名不能为空')
     return
   }
+  if (mode.value === 'smart' && !projectName.value.trim()) {
+    ElMessage.warning('项目名不能为空')
+    return
+  }
 
   try {
-    // 基础导入 reuse_id=true（ID 复用/冲突映射）
-    parsed.value.reuse_id = true
+    // reuse_id：基础导入（current/new）true（ID 复用/冲突映射）；智能导入 false（全新建）
+    parsed.value.reuse_id = mode.value !== 'smart'
 
     let target: ImportTarget
-    if (mode.value === 'new') {
+    if (mode.value === 'new' || mode.value === 'smart') {
       target = { name: projectName.value.trim() }
     } else {
       const pid = store.project?.id
@@ -235,11 +240,12 @@ async function onApply() {
 
     const project = await store.applyFullImportTo(target, parsed.value)
 
-    if (mode.value === 'new') {
+    if (mode.value === 'new' || mode.value === 'smart') {
       await projectsStore.loadSummaries()
       projectsStore.select(project.id)
+      const prefix = mode.value === 'smart' ? '智能导入完成：已新建项目' : '已新建项目'
       ElMessage.success(
-        `已新建项目「${project.name}」并导入 ${selIters.length} 条迭代${selBugs.length > 0 ? `、${selBugs.length} 条 bug` : ''}`,
+        `${prefix}「${project.name}」并导入 ${selIters.length} 条迭代${selBugs.length > 0 ? `、${selBugs.length} 条 bug` : ''}`,
       )
     } else {
       ElMessage.success(
@@ -257,11 +263,11 @@ async function onApply() {
   <el-dialog v-model="visible" :title="dialogTitle" width="960px" top="5vh">
     <!-- 顶部：项目名 + 默认状态 + 统计 -->
     <div class="top-bar">
-      <div v-if="mode === 'new'" class="name-row">
+      <div v-if="mode === 'new' || mode === 'smart'" class="name-row">
         <span class="label">项目名：</span>
         <el-input
           v-model="projectName"
-          placeholder="项目名（取自导入文件名，可修改）"
+          placeholder="项目名（智能导入时由 LLM 推断，可修改）"
           style="width: 320px"
         />
       </div>
@@ -532,7 +538,7 @@ async function onApply() {
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="onApply">
-        {{ mode === 'new' ? '新建并导入' : '应用导入' }}
+        {{ mode === 'smart' ? '智能导入并新建' : mode === 'new' ? '新建并导入' : '应用导入' }}
       </el-button>
     </template>
   </el-dialog>

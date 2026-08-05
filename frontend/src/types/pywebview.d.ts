@@ -120,6 +120,8 @@ export interface PyWebViewApi {
     | { ok: true; model: string; reply: string }
     | ApiErrorEnvelope
   >
+  /** 智能导入：弹文件框 -> 读文本 -> LLM 结构化 -> ParsedProject（预览用）。取消返回 None。 */
+  smart_import(): Promise<ParseMdResult | null | ApiErrorEnvelope>
 
   // ── 系统 ──
   open_external_url(url: string): Promise<boolean | ApiErrorEnvelope>

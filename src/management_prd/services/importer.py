@@ -200,6 +200,124 @@ def parse_import_md(text: str) -> ParsedProject:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# 智能导入：LLM 中间格式 -> ParsedProject（详见设计 §7.3 / §7.4）
+# ──────────────────────────────────────────────────────────────────────
+
+from management_prd.models.data import LlmParsedProject  # noqa: E402
+
+# 智能导入中间 id 前缀（仅 ParsedProject 内部引用一致性用；reuse_id=False 时
+# apply_full_import 会全量映射为新 DB id，故前缀值不影响最终落库 id）。
+_LLM_MOD_PREFIX = "llm-mod-"
+_LLM_ITER_PREFIX = "llm-it-"
+_LLM_BUG_PREFIX = "llm-bug-"
+
+
+def from_llm_intermediate(llm: LlmParsedProject) -> ParsedProject:
+    """LLM 中间格式 -> :class:`ParsedProject`（智能导入用）。
+
+    中间格式无内部 ID / 无锚点、缺失字段容忍（见 :class:`LlmParsedProject`）。本函数
+    为模块 / 迭代 / bug 生成内部唯一 id，使 ``iterations.modules`` / ``bugs.modules`` /
+    ``bugs.linked`` 引用在 :class:`ParsedProject` 内自洽；提交时 ``reuse_id=False``，
+    :meth:`ProjectService.apply_full_import` 会全量映射为新 DB id。
+
+    bug 关联用 ``(linked_feature, linked_date)`` 键查目标迭代（LLM 产不出内部 ID），
+    命中则 ``linked`` 指向该迭代 id，未命中置 None。
+
+    Args:
+        llm: LLM 工具调用返回的中间格式（已 :class:`LlmParsedProject` 校验）。
+
+    Returns:
+        装配好的 :class:`ParsedProject`（``includes_bug`` 按是否含 bug 自动置位）。
+    """
+    now = datetime.now()
+
+    # 模块：name -> 内部 id
+    mod_id_by_name: dict[str, str] = {}
+    modules: list[ParsedModule] = []
+    for i, name in enumerate(llm.modules):
+        mid = f"{_LLM_MOD_PREFIX}{i}"
+        mod_id_by_name[name] = mid
+        modules.append(ParsedModule(id=mid, name=name))
+
+    # 迭代：(feature, date) -> 内部 id（供 bug linked 查找）
+    iter_id_by_key: dict[tuple[str, str], str] = {}
+    iterations: list[ParsedIteration] = []
+    for i, it in enumerate(llm.iterations):
+        it_id = f"{_LLM_ITER_PREFIX}{i}"
+        feature = it.feature.strip() or it.content.strip()
+        iter_id_by_key[(feature, it.date.isoformat())] = it_id
+        subitems = [
+            ParsedSubitem(
+                seq=idx + 1,
+                content=s.content,
+                status=s.status,
+                completion_deadline=s.completion_deadline,
+            )
+            for idx, s in enumerate(it.subitems)
+        ]
+        iterations.append(
+            ParsedIteration(
+                id=it_id,
+                feature=feature,
+                modules=[mod_id_by_name[n] for n in it.modules if n in mod_id_by_name],
+                content=it.content,
+                status=it.status,
+                date=it.date,
+                completion_deadline=it.completion_deadline,
+                created_at=now,
+                updated_at=now,
+                subitems=subitems,
+            )
+        )
+
+    # bug：linked 用 (feature, date) 查目标迭代
+    bugs: list[ParsedBug] = []
+    for i, b in enumerate(llm.bugs):
+        b_id = f"{_LLM_BUG_PREFIX}{i}"
+        linked: str | None = None
+        if b.linked_feature and b.linked_date:
+            key = (b.linked_feature.strip(), b.linked_date.isoformat())
+            linked = iter_id_by_key.get(key)
+        bugs.append(
+            ParsedBug(
+                id=b_id,
+                content=b.content,
+                level=b.level,
+                status=b.status,
+                modules=[mod_id_by_name[n] for n in b.modules if n in mod_id_by_name],
+                linked=linked,
+                date=b.date,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    return ParsedProject(
+        project_id="llm-project",
+        name=llm.project_name,
+        created_at=now,
+        updated_at=now,
+        modules=modules,
+        iterations=iterations,
+        bugs=bugs,
+        includes_bug=len(bugs) > 0,
+    )
+
+
+def parse_llm_intermediate(data: dict[str, object]) -> ParsedProject:
+    """dict（LLM tool arguments）-> :class:`LlmParsedProject` -> :class:`ParsedProject`。
+
+    供 ``smart_import`` API 在拿到 LLM 工具调用参数后直接装配预览用 ParsedProject。
+    结构非法（缺必填字段 / 枚举越界）抛 :class:`ImportParseError`。
+    """
+    try:
+        llm = LlmParsedProject.model_validate(data)
+    except ValidationError as exc:
+        raise ImportParseError(f"LLM 中间格式结构非法: {exc}") from exc
+    return from_llm_intermediate(llm)
+
+
+# ──────────────────────────────────────────────────────────────────────
 # 旧版 .txt 宽松解析（v3 文本格式，保留向后兼容至第 7 步清理旧代码时移除）
 # ──────────────────────────────────────────────────────────────────────
 

@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
+import { useSettingsStore } from '@/stores/settings'
 import {
   IPixelFolderPlus,
   IPixelPencil,
   IPixelPlus,
+  IPixelSparkles,
   IPixelTrash,
   IPixelUpload,
 } from '@/constants/icons'
@@ -20,8 +22,23 @@ import { useTemplateRef } from 'vue'
 
 const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
+const settingsStore = useSettingsStore()
 const { summaries, activeProjectId } = storeToRefs(projectsStore)
 const { viewMode } = storeToRefs(requirementsStore)
+
+// 智能导入就绪：启用开关 + API 地址 / 密钥 / 模型 齐全
+const llmReady = computed(
+  () =>
+    settingsStore.llmEnabled &&
+    !!settingsStore.llmBaseUrl &&
+    !!settingsStore.llmApiKey &&
+    !!settingsStore.llmModel,
+)
+const smartImportTooltip = computed(() =>
+  llmReady.value
+    ? '用 LLM 把任意需求文档/文本识结构化为新项目'
+    : '未配置智能导入，请先在「设置 → 智能导入」中开启并填写 API 地址/密钥/模型',
+)
 
 // el-switch 切换聚合视图：active=按时间，inactive=按模块
 function onViewModeChange(val: string | number | boolean) {
@@ -95,6 +112,21 @@ async function onImportAsNew() {
     ElMessage.error(e instanceof Error ? e.message : '导入解析失败')
   }
 }
+
+// 智能导入：LLM 把任意文档识结构化为新项目（reuse_id=false 全新建）
+async function onSmartImport() {
+  if (!llmReady.value) {
+    ElMessage.warning('请先在「设置 → 智能导入」中开启并配置 LLM')
+    return
+  }
+  try {
+    const result = await requirementsStore.smartImportFile()
+    if (!result) return
+    ImportPreviewDialogRef.value?.open(result.parsed, 'smart', result.filename)
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '智能导入失败')
+  }
+}
 </script>
 
 <template>
@@ -131,6 +163,20 @@ async function onImportAsNew() {
         <el-icon class="action-icon"><IPixelUpload /></el-icon>
         <span>导入当前项目</span>
       </el-button>
+      <el-tooltip :content="smartImportTooltip" placement="right" :show-after="400">
+        <span class="tooltip-wrap">
+          <el-button
+            plain
+            size="small"
+            class="action-btn"
+            :disabled="!llmReady"
+            @click="onSmartImport"
+          >
+            <el-icon class="action-icon"><IPixelSparkles /></el-icon>
+            <span>智能导入</span>
+          </el-button>
+        </span>
+      </el-tooltip>
     </div>
 
     <div class="list">
@@ -208,6 +254,10 @@ async function onImportAsNew() {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
+}
+.tooltip-wrap {
+  /* 禁用按钮不触发鼠标事件，故用块级 span 承接 hover 以显示 tooltip */
+  display: block;
 }
 .list {
   flex: 1;

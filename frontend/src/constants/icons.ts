@@ -16,6 +16,7 @@ import IPixelPlus from '~icons/pixelarticons/plus'
 import IPixelReload from '~icons/pixelarticons/reload'
 import IPixelSettings from '~icons/pixelarticons/settings-2'
 import IPixelSortVertical from '~icons/pixelarticons/sort-vertical'
+import IPixelSparkles from '~icons/pixelarticons/sparkles'
 import IPixelTrash from '~icons/pixelarticons/trash'
 import IPixelUpload from '~icons/pixelarticons/upload'
 
@@ -33,6 +34,7 @@ export {
   IPixelReload,
   IPixelSettings,
   IPixelSortVertical,
+  IPixelSparkles,
   IPixelTrash,
   IPixelUpload,
 }

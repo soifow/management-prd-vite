@@ -512,6 +512,55 @@ class WebApi:
         except (LlmError, ManagementPrdError, ValueError, TypeError) as exc:
             return _err(exc)
 
+    def smart_import(self) -> object:
+        """智能导入：弹文件框 -> 读文本 -> LLM 结构化 -> ParsedProject（预览用）。
+
+        ``LLM`` 配置取已落盘设置（``llm_enabled`` 须开启）。返回
+        ``{"parsed": {...}, "filename": "xxx"}`` 供前端预览弹窗；取消返回 None。
+
+        错误降级（设计 §7.5）：未配置/未启用 LLM、文件过长、LLM 调用失败、返回格式
+        非法均返回错误信封，不写入。
+        """
+        try:
+            from management_prd.llm.client import LlmClient
+            from management_prd.llm.prompt import build_messages
+            from management_prd.services.importer import parse_llm_intermediate
+
+            settings = self._settings_service.load()
+            if not settings.llm_enabled:
+                raise LlmError("智能导入未启用，请在设置中开启")
+            if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
+                raise LlmError("智能导入配置不完整：请在设置中填写 API 地址 / 密钥 / 模型")
+
+            picked = self._open_text_file(
+                ["文本文件 (*.txt)", "Markdown 文件 (*.md)", "所有文件 (*.*)"]
+            )
+            if not picked:
+                return None
+            path = Path(picked)
+            # 二进制文件（.docx 等）按文本读取可能产生乱码，交由 LLM 尽力识别；明确超长则拒绝
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if len(text) > self._LLM_MAX_INPUT_CHARS:
+                raise LlmError(
+                    f"文件过长（{len(text)} 字符，上限 {self._LLM_MAX_INPUT_CHARS}），请拆分后重试"
+                )
+
+            client = LlmClient(
+                base_url=settings.llm_base_url,
+                api_key=settings.llm_api_key,
+                model=settings.llm_model,
+                timeout=settings.llm_timeout,
+            )
+            messages = build_messages(text, path.stem)
+            intermediate = client.chat_structured(messages)
+            parsed = parse_llm_intermediate(intermediate)
+            return {
+                "parsed": parsed.model_dump(mode="json"),
+                "filename": path.stem,
+            }
+        except (LlmError, ManagementPrdError, ValueError, TypeError) as exc:
+            return _err(exc)
+
     # ---------- 系统 ----------
 
     def open_external_url(self, url: str) -> object:
@@ -534,6 +583,9 @@ class WebApi:
     AUTHOR_AVATAR_URL = f"https://github.com/{AUTHOR_GITHUB_USER}.png?size=128"
     _AVATAR_FILENAME = "avatar.jpg"
     _AVATAR_TIMEOUT = 5  # 秒；超时即放弃，避免拖慢 UI
+
+    # 智能导入单次输入字符上限（防大文件超长导致 LLM 上下文溢出，见设计 §7.5）
+    _LLM_MAX_INPUT_CHARS = 100_000
 
     def _avatar_path(self) -> Path:
         """头像 B 缓存路径。"""
@@ -770,13 +822,14 @@ class WebApi:
             clear_completion_deadline=clear_deadline,
         )
 
-    def _open_text_file(self) -> str | None:
+    def _open_text_file(self, file_types: list[str] | None = None) -> str | None:
         """调用 webview 打开文件对话框，返回所选路径或 None。"""
         if self._window is None:
             raise ManagementPrdError("WebApi 窗口未注入，无法弹对话框")
+        types = file_types if file_types is not None else ["文本文件 (*.txt)", "所有文件 (*.*)"]
         result = self._window.create_file_dialog(
             webview.OPEN_DIALOG,
-            file_types=["文本文件 (*.txt)", "所有文件 (*.*)"],
+            file_types=types,
         )
         if not result:
             return None

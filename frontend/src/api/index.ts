@@ -207,6 +207,11 @@ export const applyFullImport = (
   parsed: ParsedProject,
 ): Promise<Project> => invoke(() => bridge().apply_full_import(target, parsed))
 
+/** 智能导入：弹文件框 -> 后端调 LLM 结构化 -> ParsedProject（预览用）。取消返回 null。
+ *  智能导入数据无原始 ID，提交时 reuse_id=false（全新建），由 store 在打开预览时注入。 */
+export const smartImport = (): Promise<ParseMdResult | null> =>
+  invoke(() => bridge().smart_import())
+
 /** 导出项目为 .md 双轨格式（frontmatter 权威 + 正文渲染）。include_bug 决定是否含 bug 段。 */
 export const exportProjectMd = (projectId: string, includeBug: boolean): Promise<string | null> =>
   invoke(() => bridge().export_project_md(projectId, includeBug))

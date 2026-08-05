@@ -476,6 +476,55 @@ ProjectService.apply_full_import(
     设计列的其余 §12 API（`smartImport` / `listImportBackups` / `restoreBackup` /
     `deleteBackup`）仍按 Step 5/6 计划实现。
 
+- [x] **Step 5：智能导入（完成）**
+  - `services/importer.py` 新增 `from_llm_intermediate(llm: LlmParsedProject) ->
+    ParsedProject`（§7.3/§7.4 中间格式转换）：
+    - 模块/迭代/bug 生成内部唯一 id（`llm-mod-{i}` / `llm-it-{i}` / `llm-bug-{i}` 前缀），
+      使 `iterations.modules` / `bugs.modules` / `bugs.linked` 在 ParsedProject 内自洽；
+      `reuse_id=False` 时 `apply_full_import` 全量映射为新 DB id，故前缀值不影响落库。
+    - 模块按 `name -> id` 建表，迭代/bug 的 `modules` 经此解析为 id 列表。
+    - bug `linked` 用 `(linked_feature.strip(), linked_date.isoformat())` 键查目标迭代
+      id（LLM 产不出内部 ID），命中关联、未命中置 None；未设置 linked_feature/date 置空。
+    - 子需求 seq 从 1 顺序赋值；`includes_bug` 按是否含 bug 自动置位。
+    - 另增 `parse_llm_intermediate(data: dict) -> ParsedProject` 便捷函数（dict ->
+      `LlmParsedProject.model_validate` -> `from_llm_intermediate`），结构非法
+      （缺必填/枚举越界）抛 `ImportParseError`。
+  - `api.py` 新增 `smart_import()` 方法（§7.4 流程 + §7.5 错误降级）：
+    - 读已落盘 LLM 配置；`llm_enabled=False` 或 base_url/api_key/model 缺失 -> 错误信封，
+      不弹文件框（在调用前拒绝，避免无谓 IO）。
+    - `_open_text_file` 增 `file_types` 形参（复用给智能导入的 .txt/.md/全部 文件框）。
+    - 读文本 `errors="replace"`（二进制 .docx 等尽力识别为已知限制）；超
+      `_LLM_MAX_INPUT_CHARS=100_000` 字符直接报「文件过长」。
+    - 构造 messages -> `LlmClient.chat_structured` -> `parse_llm_intermediate` 装配
+      ParsedProject，返回 `{"parsed": ..., "filename": ...}`；取消返回 None。
+    - 网络/HTTP/API/格式错误统一经 `LlmError` 落 `_err()` 信封，不写入。
+  - 前端 `types/pywebview.d.ts`：`PyWebViewApi` 新增 `smart_import()` 签名。
+  - 前端 `api/index.ts`：新增 `smartImport()` 封装（弹文件框 -> ParsedProject 预览）。
+  - 前端 `stores/requirements.ts`：新增 `smartImportFile()` action（薄封装 smartImport）。
+  - 前端 `components/ImportPreviewDialog.vue`：mode 扩为 `'current' | 'new' | 'smart'`：
+    - `smart` 模式标题「智能导入（LLM）」、项目名输入框可见（LLM 推断名可改）；
+    - `onApply` 注入 `reuse_id = mode !== 'smart'`（智能=false 全新建）；target 恒为
+      `{name}`（智能导入只新建项目）；成功提示文案区分基础/智能前缀；按钮文案
+      「智能导入并新建」。
+  - 前端 `components/ProjectSidebar.vue`：新增第三个导入入口「智能导入」按钮：
+    - `useSettingsStore` + `llmReady` computed（`llm_enabled` 且 base_url/api_key/model
+      齐全）；未就绪 `disabled` + `el-tooltip` hover 提示「请先在设置 → 智能导入中配置」
+      （用块级 `tooltip-wrap` span 承接 hover，规避禁用按钮不发鼠标事件的限制）。
+    - `onSmartImport` -> `store.smartImportFile()` -> 以 `result.parsed` 打开
+      `ImportPreviewDialog('smart', filename)`；未就绪时点击给 ElMessage 提示。
+  - 前端 `constants/icons.ts`：新增 `IPixelSparkles`（pixelarticons/sparkles）。
+  - 测试：`tests/test_smart_import.py` 17 例（`from_llm_intermediate` 转换 6 +
+    `parse_llm_intermediate` 校验 3 + 端到端 apply(reuse_id=False) 2 + WebApi.smart_import
+    集成 5 + prompt 联动 1），全部通过。WebApi 集成用 `monkeypatch LlmClient.__init__`
+    注入 `httpx.MockTransport`，配置走真实 `SettingsService.update_settings` 落盘。
+  - 校验：`pytest` 173 全过；`mypy src/` Success；`ruff check/format`（Step 5 文件）
+    clean；前端 `vue-tsc --noEmit` 通过；`eslint` 仅剩 Step 3 前已存在的
+    `types/icons.d.ts` 3 条既有错误（与本次无关）。
+  - 偏离/澄清：① §7.5「大文件超长」用硬编码常量 `_LLM_MAX_INPUT_CHARS=100_000`
+    （未做 settings 字段，YAGNI）；② .docx 等二进制文档本期不支持（`errors="replace"`
+    读为乱码交 LLM 尽力识别，属已知限制）；③ 智能导入只支持新建项目（不支持导入到
+    已有项目），因 LLM 中间格式无 project_id 且 §7.4 流程以「识结构化为新项目」为主场景。
+
 ## 18. 文件变更清单
 
 ### Python 后端
