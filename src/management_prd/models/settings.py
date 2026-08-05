@@ -40,7 +40,7 @@ class AppSettings(BaseModel):
     )
 
     settings_order: list[str] = Field(
-        default_factory=lambda: ["storage", "display", "reminder", "subitem"],
+        default_factory=lambda: ["storage", "display", "reminder", "subitem", "llm"],
         description="设置分组 tab 的显示顺序（分组 key 数组）",
     )
 
@@ -74,6 +74,35 @@ class AppSettings(BaseModel):
     show_subitem_progress_in_tree: bool = Field(
         default=False,
         description="树形功能节点是否显示子需求进度 (done/total)；关则仅功能详情页显示",
+    )
+
+    # ── LLM 智能导入配置 ──
+
+    llm_enabled: bool = Field(
+        default=False,
+        description="是否启用智能导入（LLM 结构化解析）",
+    )
+
+    llm_base_url: str = Field(
+        default="",
+        description="LLM API 基础地址（OpenAI 兼容接口），如 https://api.deepseek.com/v1",
+    )
+
+    llm_api_key: str = Field(
+        default="",
+        description="LLM API 密钥（本地明文存储，后续可加密）",
+    )
+
+    llm_model: str = Field(
+        default="",
+        description="LLM 模型名，如 deepseek-chat",
+    )
+
+    llm_timeout: int = Field(
+        default=120,
+        ge=10,
+        le=600,
+        description="LLM 请求超时（秒）",
     )
 
     @model_validator(mode="after")

@@ -5,19 +5,18 @@ import { useProjectsStore } from '@/stores/projects'
 import { useTodoStore } from '@/stores/todo'
 
 import {
-  applyImport,
-  applyImportAsNewProject,
+  applyFullImport,
   createRequirement,
   createSubitem,
   deleteRequirement,
   deleteSubitem,
-  exportProject,
+  exportProjectMd,
   getProject,
   listFeatures,
   listIterations,
   listModules,
   listSubitems,
-  pickAndParseImport,
+  parseMdImport,
   setRequirementStatus,
   setSubitemStatus,
   updateRequirement,
@@ -25,9 +24,10 @@ import {
 } from '@/api'
 import type { CreateRequirementInput, UpdateRequirementInput } from '@/api'
 import type {
+  ImportTarget,
+  ParseMdResult,
   Project,
-  ParsedRequirement,
-  PickParseResult,
+  ParsedProject,
   RequirementItem,
   RequirementStatus,
   RequirementSubitem,
@@ -286,28 +286,29 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   // ── 导入 / 导出 ──
 
-  async function pickAndImport(): Promise<PickParseResult | null> {
-    return await pickAndParseImport()
+  /** 弹 .md 文件框并解析为 ParsedProject，用于导入预览。取消返回 null。 */
+  async function parseImport(): Promise<ParseMdResult | null> {
+    return await parseMdImport()
   }
 
-  async function apply(requirements: ParsedRequirement[]) {
-    if (!project.value) return
-    project.value = await applyImport(project.value.id, requirements)
-    modules.value = await listModules(project.value.id)
+  /** 应用完整导入到目标项目（基础导入 target=project_id 或新建 name；reuse_id 由 parsed 携带）。 */
+  async function applyFullImportTo(target: ImportTarget, parsed: ParsedProject) {
+    const p = await applyFullImport(target, parsed)
+    // 无论导入到当前项目还是新建，刷新项目列表以反映最新汇总/排序
     await useProjectsStore().loadSummaries()
-    refreshTodo()
-  }
-
-  /** 新建项目并将导入需求写入，返回新建的项目（后续由调用方刷新并选中）。 */
-  async function applyAsNewProject(name: string, requirements: ParsedRequirement[]): Promise<Project> {
-    const p = await applyImportAsNewProject(name, requirements)
+    // 若导入目标为当前项目，就地刷新其数据与模块；否则由调用方选中新项目后触发 loadProject
+    if (target.project_id && project.value?.id === target.project_id) {
+      project.value = p
+      modules.value = await listModules(project.value.id)
+    }
     refreshTodo()
     return p
   }
 
-  async function exportCurrent(): Promise<string | null> {
+  /** 导出当前项目为 .md 双轨格式（弹保存对话框）。 */
+  async function exportCurrent(includeBug = true): Promise<string | null> {
     if (!project.value) return null
-    return await exportProject(project.value.id)
+    return await exportProjectMd(project.value.id, includeBug)
   }
 
   return {
@@ -342,9 +343,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     patchSubitem,
     setSubitemStatusItem,
     removeSubitem,
-    pickAndImport,
-    apply,
-    applyAsNewProject,
+    parseImport,
+    applyFullImportTo,
     exportCurrent,
     listFeatures,
   }

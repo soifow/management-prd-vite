@@ -11,7 +11,7 @@ import type {
   CreateBugInput,
   UpdateBugInput,
 } from '@/types/bug'
-import type { ParsedRequirement, PickParseResult } from '@/types/import'
+import type { ImportTarget, ParseMdResult, ParsedProject } from '@/types/import'
 import type { Module } from '@/types/module'
 import type { Project, ProjectSummary } from '@/types/project'
 import type { RequirementItem, RequirementStatus } from '@/types/requirement'
@@ -193,22 +193,19 @@ export const getTodoReminders = (): Promise<TodoReminder[]> =>
 
 // ── 导入 / 导出 ──────────────────────────────────────────────
 
-export const pickAndParseImport = (): Promise<PickParseResult | null> =>
-  invoke(() => bridge().pick_and_parse_import())
+/** 弹 .md 文件框 -> ParsedProject。取消返回 None。
+ *  旧版 .txt 入口（pick_and_parse_import / apply_import / apply_import_as_new_project）
+ *  在设计 §13 中标记为移除，Step 7 清理时随同后端旧方法一起删。 */
+export const parseMdImport = (): Promise<ParseMdResult | null> =>
+  invoke(() => bridge().parse_md_import())
 
-export const applyImport = (
-  projectId: string,
-  requirements: ParsedRequirement[],
-): Promise<Project> => invoke(() => bridge().apply_import(projectId, requirements))
-
-export const applyImportAsNewProject = (
-  name: string,
-  requirements: ParsedRequirement[],
-): Promise<Project> =>
-  invoke(() => bridge().apply_import_as_new_project(name, requirements))
-
-export const exportProject = (projectId: string): Promise<string | null> =>
-  invoke(() => bridge().export_project(projectId))
+/** 应用完整导入（基础/智能共用统一写入路径）。
+ *  target={project_id} 导入已有项目；target={name} 新建项目。reuse_id 由 parsed.reuse_id
+ *  决定（基础导入 true / 智能导入 false），由前端按来源注入。 */
+export const applyFullImport = (
+  target: ImportTarget,
+  parsed: ParsedProject,
+): Promise<Project> => invoke(() => bridge().apply_full_import(target, parsed))
 
 /** 导出项目为 .md 双轨格式（frontmatter 权威 + 正文渲染）。include_bug 决定是否含 bug 段。 */
 export const exportProjectMd = (projectId: string, includeBug: boolean): Promise<string | null> =>
@@ -231,6 +228,24 @@ export const getSettings = (): Promise<AppSettings> => invoke(() => bridge().get
 
 export const updateSettings = (patch: Partial<AppSettings>): Promise<AppSettings> =>
   invoke(() => bridge().update_settings(patch))
+
+/** LLM 测试连接配置（表单草稿，未保存也能测试）。 */
+export interface LlmTestConfig {
+  base_url?: string
+  api_key?: string
+  model?: string
+  timeout?: number
+}
+
+export interface LlmTestResult {
+  ok: true
+  model: string
+  reply: string
+}
+
+/** 测试 LLM 连接（轻量 chat 请求）。config 为空时用已落盘设置。 */
+export const testLlm = (config?: LlmTestConfig): Promise<LlmTestResult> =>
+  invoke(() => bridge().test_llm(config ?? null))
 
 // ── 系统 ─────────────────────────────────────────────────
 

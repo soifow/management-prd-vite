@@ -33,4 +33,14 @@ export interface AppSettings {
   show_no_deadline_in_todo: boolean
   /** 树形功能节点是否显示子需求进度 (done/total)；关则仅功能详情页显示 */
   show_subitem_progress_in_tree: boolean
+  /** 是否启用智能导入（LLM 结构化解析） */
+  llm_enabled: boolean
+  /** LLM API 基础地址（OpenAI 兼容接口），如 https://api.deepseek.com/v1 */
+  llm_base_url: string
+  /** LLM API 密钥（本地明文存储） */
+  llm_api_key: string
+  /** LLM 模型名，如 deepseek-chat */
+  llm_model: string
+  /** LLM 请求超时（秒） */
+  llm_timeout: number
 }

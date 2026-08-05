@@ -29,6 +29,12 @@ export const useSettingsStore = defineStore('settings', () => {
   const showNoDeadlineInTodo = ref(true)
   // 树形功能节点是否显示子需求进度 (done/total)
   const showSubitemProgressInTree = ref(false)
+  // LLM 智能导入配置
+  const llmEnabled = ref(false)
+  const llmBaseUrl = ref('')
+  const llmApiKey = ref('')
+  const llmModel = ref('')
+  const llmTimeout = ref(120)
 
   async function loadStorageInfo() {
     loading.value = true
@@ -47,13 +53,18 @@ export const useSettingsStore = defineStore('settings', () => {
     settingsOrder.value =
       settings.settings_order && settings.settings_order.length > 0
         ? settings.settings_order
-        : ['storage', 'display', 'reminder', 'subitem']
+        : ['storage', 'display', 'reminder', 'subitem', 'llm']
     reminderThresholdDays.value = settings.reminder_threshold_days
     urgentThresholdDays.value = settings.urgent_threshold_days
     reminderWarningColor.value = settings.reminder_warning_color
     urgentWarningColor.value = settings.urgent_warning_color
     showNoDeadlineInTodo.value = settings.show_no_deadline_in_todo
     showSubitemProgressInTree.value = settings.show_subitem_progress_in_tree
+    llmEnabled.value = settings.llm_enabled
+    llmBaseUrl.value = settings.llm_base_url
+    llmApiKey.value = settings.llm_api_key
+    llmModel.value = settings.llm_model
+    llmTimeout.value = settings.llm_timeout
   }
 
   /** 修改默认聚合方式并落盘。 */
@@ -106,6 +117,28 @@ export const useSettingsStore = defineStore('settings', () => {
     showSubitemProgressInTree.value = settings.show_subitem_progress_in_tree
   }
 
+  /** 修改 LLM 智能导入配置并落盘。 */
+  async function saveLlmConfig(config: {
+    enabled: boolean
+    baseUrl: string
+    apiKey: string
+    model: string
+    timeout: number
+  }) {
+    const settings = await updateSettings({
+      llm_enabled: config.enabled,
+      llm_base_url: config.baseUrl,
+      llm_api_key: config.apiKey,
+      llm_model: config.model,
+      llm_timeout: config.timeout,
+    })
+    llmEnabled.value = settings.llm_enabled
+    llmBaseUrl.value = settings.llm_base_url
+    llmApiKey.value = settings.llm_api_key
+    llmModel.value = settings.llm_model
+    llmTimeout.value = settings.llm_timeout
+  }
+
   /** 弹文件夹选择框，返回所选路径或 null（取消）。 */
   async function pickFolder(): Promise<string | null> {
     return await pickStorageDir()
@@ -142,6 +175,11 @@ export const useSettingsStore = defineStore('settings', () => {
     urgentWarningColor,
     showNoDeadlineInTodo,
     showSubitemProgressInTree,
+    llmEnabled,
+    llmBaseUrl,
+    llmApiKey,
+    llmModel,
+    llmTimeout,
     loadStorageInfo,
     loadSettings,
     saveDefaultViewMode,
@@ -149,6 +187,7 @@ export const useSettingsStore = defineStore('settings', () => {
     saveSettingsOrder,
     saveReminderSettings,
     saveSubitemProgressInTree,
+    saveLlmConfig,
     pickFolder,
     migrate,
   }

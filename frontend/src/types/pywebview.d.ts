@@ -4,7 +4,7 @@
 
 import type { ApiErrorEnvelope } from './api'
 import type { BugItem, BugLinkInfo, BugStatus, CreateBugInput, UpdateBugInput } from './bug'
-import type { ParsedRequirement, PickParseResult } from './import'
+import type { ImportTarget, ParseMdResult, ParsedProject } from './import'
 import type { Module } from './module'
 import type { Project, ProjectSummary } from './project'
 import type { RequirementItem, RequirementStatus } from './requirement'
@@ -89,16 +89,13 @@ export interface PyWebViewApi {
   resolve_bug_link(linked_iteration_id: string): Promise<BugLinkInfo | null | ApiErrorEnvelope>
 
   // ── 导入 / 导出 ──
-  pick_and_parse_import(): Promise<PickParseResult | null | ApiErrorEnvelope>
-  apply_import(
-    project_id: string,
-    requirements: ParsedRequirement[],
+  /** 弹 .md 文件框 -> ParsedProject。取消返回 None。 */
+  parse_md_import(): Promise<ParseMdResult | null | ApiErrorEnvelope>
+  /** 应用完整导入（基础/智能共用统一写入路径）。 */
+  apply_full_import(
+    target: ImportTarget,
+    parsed: ParsedProject,
   ): Promise<Project | ApiErrorEnvelope>
-  apply_import_as_new_project(
-    name: string,
-    requirements: ParsedRequirement[],
-  ): Promise<Project | ApiErrorEnvelope>
-  export_project(project_id: string): Promise<string | null | ApiErrorEnvelope>
   /** 导出项目为 .md 双轨格式（frontmatter + 正文）。 */
   export_project_md(
     project_id: string,
@@ -113,6 +110,16 @@ export interface PyWebViewApi {
   // ── 设置 ──
   get_settings(): Promise<AppSettings | ApiErrorEnvelope>
   update_settings(patch: Partial<AppSettings>): Promise<AppSettings | ApiErrorEnvelope>
+  /** 测试 LLM 连接（轻量 chat 请求）。config 为空时用已落盘设置。 */
+  test_llm(config: {
+    base_url?: string
+    api_key?: string
+    model?: string
+    timeout?: number
+  } | null): Promise<
+    | { ok: true; model: string; reply: string }
+    | ApiErrorEnvelope
+  >
 
   // ── 系统 ──
   open_external_url(url: string): Promise<boolean | ApiErrorEnvelope>

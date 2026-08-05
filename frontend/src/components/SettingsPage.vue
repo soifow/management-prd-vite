@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { IPixelFolder, IPixelSortVertical } from '@/constants/icons'
 
 import { useSettingsStore } from '@/stores/settings'
-import { whenReady } from '@/api'
+import { testLlm, whenReady } from '@/api'
 import { moveKey, normalizeOrder } from '@/utils/settingsOrder'
 import type { ProjectListDateMode, ViewMode } from '@/types/settings'
 
@@ -23,6 +23,7 @@ const GROUPS = [
   { key: 'display', label: '显示设置' },
   { key: 'reminder', label: '提醒设置' },
   { key: 'subitem', label: '子需求进度' },
+  { key: 'llm', label: '智能导入' },
 ] as const
 // 全部已注册分组的 key（规范化顺序与拖拽重排的合法集合；新增分组自动纳入）
 const GROUP_KEYS = GROUPS.map((g) => g.key)
@@ -60,6 +61,13 @@ const draftUrgentColor = ref(settingsStore.urgentWarningColor)
 const draftShowNoDeadline = ref(settingsStore.showNoDeadlineInTodo)
 // 子需求进度草稿
 const draftShowSubitemProgress = ref(settingsStore.showSubitemProgressInTree)
+// LLM 智能导入配置草稿
+const draftLlmEnabled = ref(settingsStore.llmEnabled)
+const draftLlmBaseUrl = ref(settingsStore.llmBaseUrl)
+const draftLlmApiKey = ref(settingsStore.llmApiKey)
+const draftLlmModel = ref(settingsStore.llmModel)
+const draftLlmTimeout = ref(settingsStore.llmTimeout)
+const testingLlm = ref(false)
 
 // 项目列表日期口径草稿（保存时一并落盘）
 const draftProjectListDateMode = ref<ProjectListDateMode>(settingsStore.projectListDateMode)
@@ -195,7 +203,30 @@ async function onChangeStorage() {
   }
 }
 
-// 保存：落盘「默认聚合方式」+「项目列表日期口径」+「提醒设置」，
+// 测试 LLM 连接：用表单草稿（未保存也能测），成功后提示
+async function onTestLlm() {
+  if (!draftLlmBaseUrl.value.trim() || !draftLlmModel.value.trim()) {
+    ElMessage.warning('请先填写 API 地址与模型名')
+    return
+  }
+  testingLlm.value = true
+  try {
+    const result = await testLlm({
+      base_url: draftLlmBaseUrl.value.trim(),
+      api_key: draftLlmApiKey.value.trim(),
+      model: draftLlmModel.value.trim(),
+      timeout: draftLlmTimeout.value,
+    })
+    const reply = result.reply ? ` 回复：${result.reply}` : ''
+    ElMessage.success(`连接成功（${result.model}）${reply}`)
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '连接失败')
+  } finally {
+    testingLlm.value = false
+  }
+}
+
+// 保存：落盘「默认聚合方式」+「项目列表日期口径」+「提醒设置」+「LLM 配置」，
 // 不回写主界面当前视图（二者解耦：默认值只在冷启动生效）
 async function onSave() {
   try {
@@ -209,6 +240,13 @@ async function onSave() {
       draftShowNoDeadline.value,
     )
     await settingsStore.saveSubitemProgressInTree(draftShowSubitemProgress.value)
+    await settingsStore.saveLlmConfig({
+      enabled: draftLlmEnabled.value,
+      baseUrl: draftLlmBaseUrl.value.trim(),
+      apiKey: draftLlmApiKey.value.trim(),
+      model: draftLlmModel.value.trim(),
+      timeout: draftLlmTimeout.value,
+    })
     emit('save')
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '保存设置失败')
@@ -366,6 +404,69 @@ async function onSave() {
               <el-form-item label="树形显示子需求进度">
                 <el-switch v-model="draftShowSubitemProgress" />
                 <span class="field-hint">开启时，树形功能节点追加 (完成数/总数) 进度显示</span>
+              </el-form-item>
+            </el-form>
+          </template>
+
+          <!-- 智能导入（LLM） -->
+          <template v-else-if="g.key === 'llm'">
+            <h3 class="section-title">智能导入</h3>
+            <p class="section-desc">
+              配置 LLM（大语言模型）接口后，可使用「智能导入」功能将任意需求文档/文本自动识别为结构化需求。支持 OpenAI 兼容接口（覆盖 DeepSeek / 通义 / Kimi / ChatGLM 等提供 api_key 的模型）。
+            </p>
+            <el-form label-position="top">
+              <el-form-item label="启用智能导入">
+                <el-switch v-model="draftLlmEnabled" />
+                <span class="field-hint">开启后侧边栏出现「智能导入」入口</span>
+              </el-form-item>
+              <el-form-item label="API 地址">
+                <el-input
+                  v-model="draftLlmBaseUrl"
+                  placeholder="https://api.deepseek.com/v1"
+                  :disabled="!draftLlmEnabled"
+                />
+                <span class="field-hint">OpenAI 兼容接口基础地址，通常以 /v1 结尾</span>
+              </el-form-item>
+              <el-form-item label="API 密钥">
+                <el-input
+                  v-model="draftLlmApiKey"
+                  type="password"
+                  show-password
+                  placeholder="sk-..."
+                  :disabled="!draftLlmEnabled"
+                />
+                <span class="field-hint">本地明文存储（后续可加密）</span>
+              </el-form-item>
+              <el-form-item label="模型名">
+                <el-input
+                  v-model="draftLlmModel"
+                  placeholder="deepseek-chat"
+                  :disabled="!draftLlmEnabled"
+                />
+                <span class="field-hint">如 deepseek-chat、qwen-plus、moonshot-v1-8k 等</span>
+              </el-form-item>
+              <el-form-item label="超时（秒）">
+                <el-input-number
+                  v-model="draftLlmTimeout"
+                  :min="10"
+                  :max="600"
+                  :step="10"
+                  :disabled="!draftLlmEnabled"
+                  style="width: 160px"
+                />
+                <span class="field-hint">大文件/复杂文档可适当增大</span>
+              </el-form-item>
+              <el-form-item>
+                <el-button
+                  type="primary"
+                  plain
+                  :loading="testingLlm"
+                  :disabled="!draftLlmEnabled || !draftLlmBaseUrl.trim() || !draftLlmModel.trim()"
+                  @click="onTestLlm"
+                >
+                  测试连接
+                </el-button>
+                <span class="field-hint">验证 API 地址、密钥与模型是否可用</span>
               </el-form-item>
             </el-form>
           </template>

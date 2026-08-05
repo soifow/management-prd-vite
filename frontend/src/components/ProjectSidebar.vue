@@ -77,9 +77,9 @@ async function onImportCurrent() {
     return
   }
   try {
-    const parsed = await requirementsStore.pickAndImport()
-    if (!parsed) return
-    ImportPreviewDialogRef.value?.open(parsed.requirements, 'current')
+    const result = await requirementsStore.parseImport()
+    if (!result) return
+    ImportPreviewDialogRef.value?.open(result.parsed, 'current')
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '导入解析失败')
   }
@@ -88,9 +88,9 @@ async function onImportCurrent() {
 // 导入为新建项目：不要求已有项目，项目名从文件名推测
 async function onImportAsNew() {
   try {
-    const parsed = await requirementsStore.pickAndImport()
-    if (!parsed) return
-    ImportPreviewDialogRef.value?.open(parsed.requirements, 'new', parsed.filename)
+    const result = await requirementsStore.parseImport()
+    if (!result) return
+    ImportPreviewDialogRef.value?.open(result.parsed, 'new', result.filename)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '导入解析失败')
   }

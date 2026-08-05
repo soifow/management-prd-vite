@@ -23,6 +23,7 @@ import webview
 
 from management_prd.errors import (
     ExportError,
+    LlmError,
     ManagementPrdError,
     NotFoundError,
     StorageError,
@@ -485,6 +486,30 @@ class WebApi:
             settings = self._settings_service.update_settings(patch)
             return settings.model_dump(mode="json")
         except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def test_llm(self, config: dict[str, object] | None = None) -> object:
+        """测试 LLM 连接（轻量 chat 请求，验证凭据/模型/网络）。
+
+        ``config`` 可选覆盖当前设置（表单草稿未保存时用前端传入值测试）。形如
+        ``{"base_url": "...", "api_key": "...", "model": "...", "timeout": 120}``。
+        缺省字段回退到已落盘的设置。
+        """
+        try:
+            from management_prd.llm.client import LlmClient
+
+            settings = self._settings_service.load()
+            cfg = config or {}
+            base_url = str(cfg.get("base_url") or settings.llm_base_url)
+            api_key = str(cfg.get("api_key") or settings.llm_api_key)
+            model = str(cfg.get("model") or settings.llm_model)
+            timeout_raw = cfg.get("timeout", settings.llm_timeout)
+            timeout = (
+                int(timeout_raw) if isinstance(timeout_raw, (int, str)) else settings.llm_timeout
+            )
+            client = LlmClient(base_url=base_url, api_key=api_key, model=model, timeout=timeout)
+            return client.test_connection()
+        except (LlmError, ManagementPrdError, ValueError, TypeError) as exc:
             return _err(exc)
 
     # ---------- 系统 ----------

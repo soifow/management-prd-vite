@@ -396,6 +396,86 @@ ProjectService.apply_full_import(
     `tests/test_exporter.py`、`tests/test_project_service.py`）与 `scripts/*` 历史脚本未格式化，
     非 Step 2 引入，建议 Step 1 补丁或单独清理。
 
+- [x] **Step 3：前端导入预览弹窗重写 + 入口接线（完成）**
+  - `types/import.ts` 重写：删除旧 `ParsedRequirement` / `PickParseResult`，新增
+    `ParsedModule` / `ParsedSubitem` / `ParsedIteration` / `ParsedBug` / `ParsedProject` /
+    `ImportTarget` / `ParseMdResult`（与后端 `models/data.py` ParsedProject 契约一致；
+    `selected` 字段后端默认 True、前端可取消以排除项；`reuse_id` 非持久化，提交时按
+    来源注入：基础导入 true、智能导入 false）。
+  - `api/index.ts`：移除旧 `pickAndParseImport` / `applyImport` / `applyImportAsNewProject` /
+    `exportProject`（旧 .txt 路径），新增 `parseMdImport()` / `applyFullImport(target, parsed)`；
+    `exportProjectMd` 保留（Step 1）。
+  - `types/pywebview.d.ts`：同步移除 `pick_and_parse_import` / `apply_import` /
+    `apply_import_as_new_project` / `export_project`，新增 `parse_md_import` /
+    `apply_full_import`（`target: ImportTarget` / `parsed: ParsedProject`）。
+    **后端旧 4 方法（`api.py`）保留至 Step 7 清理**（与 Step 2 保留 `_LegacyTxtImporter`
+    同范式），前端已无调用点。
+  - `stores/requirements.ts`：移除旧 `pickAndImport` / `apply` / `applyAsNewProject` /
+    `exportCurrent()`；新增 `parseImport()`（弹 .md 文件框 -> `ParseMdResult`）、
+    `applyFullImportTo(target, parsed)`（统一写入路径；target=project_id 时就地刷新当前
+    项目数据与模块，target=name 时仅刷新 summaries 交由调用方选中新项目）、
+    `exportCurrent(includeBug=true)`（改走 `exportProjectMd`）。
+  - `ImportPreviewDialog.vue` 重写（核心）：适配新 `ParsedProject` 结构，**基础/智能共用**。
+    - `open(parsed, mode, filename)`：`structuredClone` 深拷贝可编辑副本，默认展开全部模块分组。
+    - 顶部：项目名（new 模式可编辑）+ 默认状态下拉（`applyDefaultStatus` 把 status==='done'
+      的迭代与子需求统一覆盖）+ 统计（迭代 已选/总数，bug 含时亦显）。
+    - 左侧：`el-collapse` 按模块分组（`grouped` computed：迭代/bug 按其 `modules` id 展开，
+      无模块归「（未分组）」）；每个迭代/bug 节点带勾选 + 状态/级别标签 + 日期，点击进入右侧
+      详情。模块分组标题带「全选/部分」三态 checkbox（同时勾选该组迭代与 bug）。
+    - 右侧详情：选中迭代 -> 编辑状态/完成时限（deferred 联动清空）/只读日期/模块标签/
+      内容预览/子需求清单（勾选 + 状态可改）；选中 bug -> 编辑级别/状态/只读日期/模块标签/
+      关联迭代显示（`linked` 失效标灰）/内容预览。
+    - `onApply`：基础导入注入 `reuse_id=true`；current 模式校验当前项目 id、走
+      `applyFullImportTo({project_id})`；new 模式 `applyFullImportTo({name})` + `loadSummaries`
+      + 选中新项目；提示文案含迭代/bug 计数。
+  - `ProjectSidebar.vue`：`onImportCurrent` / `onImportAsNew` 改调 `store.parseImport()`，
+    以 `result.parsed` 打开新 `ImportPreviewDialog`（filename 取自 `result.filename`）。
+    **智能导入入口（§12 三入口）留待 Step 5 接线**，本期仅基础导入两个入口。
+  - 校验：前端 `pnpm type-check` 通过；`pnpm lint` 仅剩 3 条 `types/icons.d.ts` 既有错误
+    （`git stash` 验证为 Step 3 前已存在，与本次无关）。后端 `uv run pytest` 133 全过
+    （Step 3 未动后端）。`structuredClone` 经 WebView2（Windows Chromium）可用。
+  - 已知：旧 .txt 导入路径（前端 4 方法 + 后端 `pick_and_parse_import`/`apply_import`/
+    `apply_import_as_new_project`/`export_project` + `_LegacyTxtImporter`/`ParsedImport`/
+    `ParsedRequirement`/`parse_import`）保留至 Step 7 统一清理。
+
+- [x] **Step 4：LLM 基础设施（完成）**
+  - 新增依赖 `httpx`（`uv add httpx`）。
+  - 新增 `src/management_prd/llm/__init__.py` / `llm/client.py` / `llm/prompt.py` /
+    `llm/schema.py`：
+    - `LlmClient`：OpenAI Chat Completions 兼容客户端，`httpx` 同步 POST，
+      `test_connection()` 轻量验证 + `chat_structured()` 强制 tool use 返回中间格式；
+      可注入 `transport`（测试用 `httpx.MockTransport`，生产为 None 走真实网络）；
+      所有网络/HTTP/API/解析错误统一转 `LlmError`。
+    - `IMPORT_PROJECT_TOOL_SCHEMA`：中间格式 JSON Schema + tool 定义（枚举与
+      `RequirementStatus` / `BugLevel` / `BugStatus` 一致，手工保持同步）。
+    - `build_messages` / `build_system_prompt` / `build_user_prompt`：system+user
+      两段式 prompt 构造，含数据结构说明 + 枚举约束 + 状态/日期推断规则。
+  - `models/settings.py`：`AppSettings` 新增 `llm_enabled` / `llm_base_url` /
+    `llm_api_key` / `llm_model` / `llm_timeout`（5 字段，落盘 `settings.json`）；
+    `settings_order` 默认工厂追加 `'llm'`。
+  - `api.py`：新增 `test_llm(config=None)` 方法（前端可传草稿配置测试，缺省回退
+    已落盘设置）；`LlmError` import 已加入。
+  - 前端 `types/settings.ts`：`AppSettings` 接口新增 5 个 LLM 字段。
+  - 前端 `stores/settings.ts`：新增 `llmEnabled` / `llmBaseUrl` / `llmApiKey` /
+    `llmModel` / `llmTimeout` 响应式 ref + `loadSettings` 回填 + `saveLlmConfig`
+    方法；`settingsOrder` fallback 追加 `'llm'`。
+  - 前端 `api/index.ts`：新增 `testLlm(config?)` 封装 + `LlmTestConfig` /
+    `LlmTestResult` 类型。
+  - 前端 `types/pywebview.d.ts`：`PyWebViewApi` 新增 `test_llm` 签名。
+  - 前端 `SettingsPage.vue`：GROUPS 追加 `{key:'llm', label:'智能导入'}`；
+    新增 LLM 配置草稿（5 ref）+ `testingLlm` ref + `onTestLlm()` 测试连接；
+    `onSave` 追加 `saveLlmConfig` 调用；模板新增「智能导入」tab（启用开关 +
+    API 地址/密钥/模型/超时 + 测试连接按钮，未启用时输入框 disabled）。
+  - 测试：`tests/test_llm.py` 23 例（配置校验 2 + test_connection 8 +
+    chat_structured 5 + Schema 形状 4 + prompt 4），全部通过。
+  - 校验：`pytest` 156 全过；`mypy src/` Success；`ruff check/format` clean；
+    前端 `vue-tsc --noEmit` 通过；`eslint` clean。
+  - 偏离 §12 设计点：设计列了 `getLlmConfig`/`updateLlmConfig` 两个独立 API，但
+    §7.1 已规定 LLM 配置落盘 `settings.json`（即 `AppSettings` 一部分），故实际复用
+    `get_settings`/`update_settings`，前端以 `saveLlmConfig` 封装，避免冗余端点。
+    设计列的其余 §12 API（`smartImport` / `listImportBackups` / `restoreBackup` /
+    `deleteBackup`）仍按 Step 5/6 计划实现。
+
 ## 18. 文件变更清单
 
 ### Python 后端

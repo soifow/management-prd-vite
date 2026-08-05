@@ -20,7 +20,7 @@ def test_load_returns_default_when_missing(bootstrap: BootstrapService) -> None:
     settings = svc.load()
     assert settings.default_view_mode == "date"
     assert settings.project_list_date_mode == "latest_any"
-    assert settings.settings_order == ["storage", "display", "reminder", "subitem"]
+    assert settings.settings_order == ["storage", "display", "reminder", "subitem", "llm"]
     assert settings.reminder_threshold_days == 7
     assert settings.urgent_threshold_days == 3
     assert settings.reminder_warning_color == "#eb9f24"
@@ -59,13 +59,18 @@ def test_get_settings_dict(bootstrap: BootstrapService) -> None:
     assert d == {
         "default_view_mode": "date",
         "project_list_date_mode": "latest_any",
-        "settings_order": ["storage", "display", "reminder", "subitem"],
+        "settings_order": ["storage", "display", "reminder", "subitem", "llm"],
         "reminder_threshold_days": 7,
         "urgent_threshold_days": 3,
         "reminder_warning_color": "#eb9f24",
         "urgent_warning_color": "#dc2626",
         "show_no_deadline_in_todo": True,
         "show_subitem_progress_in_tree": False,
+        "llm_enabled": False,
+        "llm_base_url": "",
+        "llm_api_key": "",
+        "llm_model": "",
+        "llm_timeout": 120,
     }
 
 
