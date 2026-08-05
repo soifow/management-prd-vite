@@ -166,32 +166,6 @@ class ProjectSummary(BaseModel):
     updated_at: datetime.datetime
 
 
-# ---------- 旧版导入数据（解析预览，v3 文本格式） ----------
-
-
-class ParsedRequirement(BaseModel):
-    """解析得到的一条需求候选（旧版 v3 文本导入，保留至彻底移除）。
-
-    每个 ``(date, module, content)`` 产出一条；``feature`` 默认取 ``content``。
-    ``module`` 保留以兼容导入解析（导入文本仍是单模块）；``module_names`` 由
-    :meth:`ProjectService.apply_import` 内部派生 ``[module]``。
-    """
-
-    module: str = ""
-    module_names: list[str] = []  # apply_import 时由 module 派生
-    feature: str = ""
-    content: str
-    status: RequirementStatus = RequirementStatus.DONE
-    date: datetime.date
-    selected: bool = True
-
-
-class ParsedImport(BaseModel):
-    """一次导入解析的全部结果（旧版）。"""
-
-    requirements: list[ParsedRequirement] = Field(default_factory=list)
-
-
 # ---------- API 入参 DTO（pydantic 校验前端传入） ----------
 
 

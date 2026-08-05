@@ -7,11 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from management_prd.models.data import (
-    CreateRequirementInput,
-    ParsedRequirement,
-    UpdateRequirementInput,
-)
+from management_prd.models.data import CreateRequirementInput, UpdateRequirementInput
 from management_prd.models.requirement import RequirementStatus
 from management_prd.services.db_service import DbService
 from management_prd.services.project_service import ProjectService
@@ -465,98 +461,6 @@ def test_list_summaries_sorted_newest_first_empty_last(service: ProjectService) 
     service.create_project("C-空")  # 无任何需求
     names = [s.name for s in service.list_summaries()]
     assert names == ["A-新", "B-旧", "C-空"]
-
-
-# ---------- apply_import 去重 ----------
-
-
-def test_apply_import_new_items(service: ProjectService) -> None:
-    p = service.create_project("项目A")
-    parsed = [
-        ParsedRequirement(
-            module="模块A",
-            feature="功能X",
-            content="需求X",
-            status=RequirementStatus.DONE,
-            date=date(2026, 6, 29),
-        ),
-        ParsedRequirement(
-            module="模块A",
-            feature="需求Y",
-            content="需求Y",
-            status=RequirementStatus.TODO,
-            date=date(2026, 6, 29),
-        ),
-    ]
-    project = service.apply_import(p.id, parsed)
-    assert len(project.items) == 2
-
-
-def test_apply_import_dedup_same_date_module_content(service: ProjectService) -> None:
-    p = service.create_project("项目A")
-    parsed1 = [
-        ParsedRequirement(
-            module="模块A",
-            feature="需求X",
-            content="需求X",
-            status=RequirementStatus.DONE,
-            date=date(2026, 6, 29),
-        )
-    ]
-    service.apply_import(p.id, parsed1)
-    # 重复导入同一条（同 date+module+content）-> 不复制
-    service.apply_import(p.id, parsed1)
-    project = service.get(p.id)
-    assert len(project.items) == 1
-
-
-def test_apply_import_different_date_same_feature(service: ProjectService) -> None:
-    """同 feature 不同 date -> 两条记录（迭代链）。"""
-    p = service.create_project("项目A")
-    service.apply_import(
-        p.id,
-        [
-            ParsedRequirement(
-                module="模块A",
-                feature="功能X",
-                content="功能X",
-                status=RequirementStatus.DONE,
-                date=date(2026, 6, 29),
-            )
-        ],
-    )
-    service.apply_import(
-        p.id,
-        [
-            ParsedRequirement(
-                module="模块A",
-                feature="功能X",
-                content="功能X",
-                status=RequirementStatus.TODO,
-                date=date(2026, 7, 15),
-            )
-        ],
-    )
-    project = service.get(p.id)
-    assert len(project.items) == 2
-    # 不改已有状态
-    assert project.items[0].status == RequirementStatus.DONE
-
-
-def test_apply_import_skips_unselected(service: ProjectService) -> None:
-    p = service.create_project("项目A")
-    parsed = [
-        ParsedRequirement(
-            module="模块A",
-            feature="需求X",
-            content="需求X",
-            status=RequirementStatus.DONE,
-            date=date(2026, 6, 29),
-            selected=False,
-        )
-    ]
-    project = service.apply_import(p.id, parsed)
-    assert project.items == []
 
 
 # ---------- 同 (feature, date) upsert 并入（v4） ----------

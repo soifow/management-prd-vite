@@ -33,18 +33,6 @@ STATUS_LABEL: dict[RequirementStatus, str] = {
     RequirementStatus.DEFERRED: "暂缓",
 }
 
-# 导入解析时的「状态段」关键字 -> 状态。键为模块标题归一化（strip + 小写）。
-# 注：``"bug"`` 关键字已移除，旧文本中 ``bug`` 段标题退化为普通模块名。
-STATUS_SECTION_KEYWORDS: dict[str, RequirementStatus] = {
-    "to do": RequirementStatus.TODO,
-    "todo": RequirementStatus.TODO,
-    "待办": RequirementStatus.TODO,
-    "暂缓": RequirementStatus.DEFERRED,
-}
-
-# 反向映射：尾标文本 -> 状态。
-LABEL_TO_STATUS: dict[str, RequirementStatus] = {v: k for k, v in STATUS_LABEL.items()}
-
 
 class RequirementItem(BaseModel):
     """一条需求迭代记录（单日期）。

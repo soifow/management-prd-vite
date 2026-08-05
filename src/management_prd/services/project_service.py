@@ -30,7 +30,6 @@ from management_prd.models.data import (
     ParsedIteration,
     ParsedModule,
     ParsedProject,
-    ParsedRequirement,
     ParsedSubitem,
     ProjectSummary,
     UpdateRequirementInput,
@@ -816,78 +815,6 @@ class ProjectService:
             if cur.rowcount == 0:
                 raise NotFoundError(f"子需求不存在: {subitem_id}")
         return True
-
-    # ---------- 导入合并 ----------
-
-    def apply_import(
-        self,
-        project_id: str,
-        parsed: list[ParsedRequirement],
-    ) -> Project:
-        """应用导入预览结果到项目（去重合并，只新增不改已有状态）。
-
-        去重键 = ``(date, module, content)``（导入文本单 module，``module_names=[module]``，
-        取首个模块名参与去重，与 v3 行为等价）。已存在则跳过；否则新建。
-        """
-        now = _now()
-        with self._db.transaction() as conn:
-            self._assert_project_exists(conn, project_id)
-            existing_rows = conn.execute(
-                "SELECT id, date, content FROM requirements WHERE project_id = ?",
-                (project_id,),
-            ).fetchall()
-            # 去重键仍按 (date, module, content)：用 requirement_modules 取首个模块名
-            existing: set[tuple[str, str, str]] = set()
-            for r in existing_rows:
-                mrow = conn.execute(
-                    "SELECT m.name FROM requirement_modules rm JOIN modules m ON m.id = rm.module_id"
-                    " WHERE rm.requirement_id = ? ORDER BY m.name LIMIT 1",
-                    (r["id"],),
-                ).fetchone()
-                mod_name = mrow["name"] if mrow is not None else ""
-                existing.add((r["date"], mod_name, r["content"]))
-            for req in parsed:
-                if not req.selected:
-                    continue
-                module_name = req.module.strip()
-                key = (req.date.isoformat(), module_name, req.content)
-                if key in existing:
-                    continue
-                feature = req.feature.strip() or req.content
-                new_id = _new_id()
-                conn.execute(
-                    "INSERT INTO requirements"
-                    "(id, project_id, feature, content, status, date,"
-                    " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        new_id,
-                        project_id,
-                        feature,
-                        req.content,
-                        req.status.value,
-                        req.date.isoformat(),
-                        now.isoformat(),
-                        now.isoformat(),
-                    ),
-                )
-                if module_name:
-                    module_ids = self._modules.ensure_modules(conn, project_id, [module_name])
-                    self._modules.replace_requirement_modules(conn, new_id, module_ids)
-                existing.add(key)
-            conn.execute(
-                "UPDATE projects SET updated_at = ? WHERE id = ?",
-                (now.isoformat(), project_id),
-            )
-        return self.get(project_id)
-
-    def apply_import_as_new_project(
-        self,
-        name: str,
-        parsed: list[ParsedRequirement],
-    ) -> Project:
-        """新建项目并把导入需求全部写入（用于「导入新建项目」）。"""
-        summary = self.create_project(name)
-        return self.apply_import(summary.id, parsed)
 
     # ---------- 内部工具 ----------
 

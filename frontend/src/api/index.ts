@@ -193,9 +193,7 @@ export const getTodoReminders = (): Promise<TodoReminder[]> =>
 
 // ── 导入 / 导出 ──────────────────────────────────────────────
 
-/** 弹 .md 文件框 -> ParsedProject。取消返回 None。
- *  旧版 .txt 入口（pick_and_parse_import / apply_import / apply_import_as_new_project）
- *  在设计 §13 中标记为移除，Step 7 清理时随同后端旧方法一起删。 */
+/** 弹 .md 文件框 -> ParsedProject。取消返回 None。 */
 export const parseMdImport = (): Promise<ParseMdResult | null> =>
   invoke(() => bridge().parse_md_import())
 

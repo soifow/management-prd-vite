@@ -49,9 +49,7 @@ def _make_snapshot(include_bug: bool = True) -> ParsedProject:
                         status=RequirementStatus.DONE,
                         completion_deadline=date(2026, 1, 8),
                     ),
-                    ParsedSubitem(
-                        seq=2, content="手机验证码", status=RequirementStatus.TODO
-                    ),
+                    ParsedSubitem(seq=2, content="手机验证码", status=RequirementStatus.TODO),
                 ],
             ),
         ],

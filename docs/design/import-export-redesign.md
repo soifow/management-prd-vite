@@ -338,11 +338,11 @@ ProjectService.apply_full_import(
 4. LLM 基础设施（settings 字段 + 设置页 + client + 测试连接）。
 5. 智能导入（prompt + 中间格式 + smart_import API + 前端入口）。
 6. 导入前备份 + 回滚机制（db_service 方法 + manifest + 设置页 tab）。
-7. 清理旧导入导出代码 + 文档更新（在 CLAUDE.md「已知技术问题与修复记录」追加子节）。
+7. 清理旧导入导出代码 + 文档更新（在 CLAUDE.md「已知技术问题与修复记录」追加子节）。**（完成）**
 
 ## 17.1 执行进度（断点恢复用）
 
-> 每完成一步在此勾选并记录关键产出，便于中断后恢复。日期：2026-08-04。
+> 每完成一步在此勾选并记录关键产出，便于中断后恢复。日期：2026-08-04 起，Step 7 于 2026-08-05 完成。
 
 - [x] **Step 1：后端导出器重写（完成）**
   - 新增依赖 `pyyaml`（`uv add pyyaml`）、`types-PyYAML`（dev stub）。
@@ -586,6 +586,39 @@ ProjectService.apply_full_import(
     `_make_api` 落盘到真实用户目录（`service._bootstrap` 默认指向 platformdirs 中文
     路径）的环境固有偶发问题，非 Step 6 引入（Step 6 的 `test_import_backup.py`
     `_make_api` 不调 `update_settings`、只 `load()` 不写盘，独立跑全过）。
+
+- [x] **Step 7：清理旧导入导出代码 + 文档更新（完成）**
+  - `api.py` 移除旧 4 方法：`pick_and_parse_import` / `apply_import` /
+    `apply_import_as_new_project` / `export_project`（其中 `export_project` 在 Step 1
+    已最小适配为 .md，本次彻底移除）；同步删除 `export_project` 专用辅助函数
+    `_save_dialog`（仅被其调用，`_save_dialog_md` 保留）；清理模块 docstring 中
+    「对话框方法（pick_and_parse_import / export_project）」的过期描述；移除
+    `ParsedImport` / `parse_import` 两个 import。
+  - `services/importer.py` 删除整段旧版 `.txt` 宽松解析（§6 保留至 Step 7 的
+    `_LegacyTxtImporter` / `parse_import` / `_SeenEntry` / `parse_yymmdd` /
+    `is_separator` / `_strip_status_tag` / `_status_for_module_title` + 一组旧正则
+    常量 + `_STATUS_PRIORITY` + `LABEL_TO_STATUS`/`STATUS_SECTION_KEYWORDS` 导入）；
+    模块 docstring 移除「旧版保留」说明。
+  - `models/data.py` 删除 `ParsedRequirement` / `ParsedImport` 两个旧模型（§6 旧版
+    导入解析模型）。
+  - `models/requirement.py` 删除 `STATUS_SECTION_KEYWORDS` / `LABEL_TO_STATUS` 两个
+    反向映射常量（仅被旧解析器使用，现已完全死代码；`STATUS_LABEL` 仍被 exporter
+    使用，保留）。
+  - `services/project_service.py` 删除旧 `apply_import` / `apply_import_as_new_project`
+    （被新 `apply_full_import` 取代）；移除 `ParsedRequirement` import。
+  - 前端 `api/index.ts` 清理 `parseMdImport` 上过期注释（旧 .txt 入口说明）。
+  - 测试：`tests/test_importer.py` 删除旧 .txt 解析 10 例 + `parse_import` /
+    `parse_yymmdd` import；`tests/test_project_service.py` 删除旧 `apply_import` 4 例 +
+    `ParsedRequirement` import；删除 `tests/fixtures/sample.txt`（仅旧 .txt 测试引用）
+    与 `tests/conftest.py`（仅未使用常量 `FIXTURES_DIR` 指向该 fixture）。
+  - 顺带清理：`ruff format` 修复 `models/data.py` / `exporter.py` / `test_exporter.py`
+    三处遗留格式问题（Step 2 已知项，本次一并落定）。
+  - 校验：`pytest` 179 全过（Step 6 后 173 + 旧代码清理净减，无新增功能）；`mypy src/`
+    Success（28 文件）；`ruff check` / `ruff format --check`（src/ tests/）clean；
+    前端 `vue-tsc --noEmit` 通过；`eslint` 仅剩 `types/icons.d.ts` 3 条 Step 3 前既有
+    错误（与本次无关）。净删 850 行（含 fixture/conftest）。
+  - 已完成：CLAUDE.md「已知技术问题与修复记录」追加「导入/导出重设计」子节（Step 7
+    文档更新部分，见 repo）。
 
 ## 18. 文件变更清单
 

@@ -8,8 +8,8 @@ Vue/Element Plus UI。**所有方法返回值必须是 JSON 可序列化的**（
     成功 -> 返回业务数据（dict / list / str / None / bool）
     失败 -> 返回 ``{"success": False, "error": "msg"}`` 统一错误信封
 
-对话框方法（``pick_and_parse_import`` / ``export_project``）需要 ``webview.Window``，
-由 :func:`app.run` 在 :func:`webview.create_window` 之后调用
+对话框方法（``parse_md_import`` / ``smart_import`` / ``export_project_md`` 等）需要
+``webview.Window``，由 :func:`app.run` 在 :func:`webview.create_window` 之后调用
 :func:`set_window` 注入。
 """
 
@@ -31,7 +31,6 @@ from management_prd.errors import (
 from management_prd.models.bug import BugLevel, BugStatus, CreateBugInput, UpdateBugInput
 from management_prd.models.data import (
     CreateRequirementInput,
-    ParsedImport,
     ProjectSummary,
     UpdateRequirementInput,
 )
@@ -40,7 +39,6 @@ from management_prd.models.subitem import CreateSubitemInput, UpdateSubitemInput
 from management_prd.services.bootstrap_service import BootstrapService
 from management_prd.services.bug_service import BugService
 from management_prd.services.db_service import DbService
-from management_prd.services.importer import parse_import
 from management_prd.services.module_service import ModuleService
 from management_prd.services.project_service import ProjectService
 from management_prd.services.settings_service import SettingsService
@@ -300,50 +298,6 @@ class WebApi:
 
     # ---------- 导入/导出 ----------
 
-    def pick_and_parse_import(self) -> object:
-        """弹打开文件框，解析为 ParsedRequirement 列表。取消返回 None。
-
-        返回 ``{"requirements": [...], "filename": "xxx"}`` 以便前端用文件名推测项目名。
-        """
-        try:
-            picked = self._open_text_file()
-            if not picked:
-                return None
-            path = Path(picked)
-            text = path.read_text(encoding="utf-8")
-            parsed: ParsedImport = parse_import(text)
-            filename_stem = path.stem
-            return {
-                "requirements": [r.model_dump(mode="json") for r in parsed.requirements],
-                "filename": filename_stem,
-            }
-        except (ManagementPrdError, ValueError) as exc:
-            return _err(exc)
-
-    def apply_import(self, project_id: str, requirements: list[dict[str, object]]) -> object:
-        """应用导入预览结果。"""
-        try:
-            from management_prd.models.data import ParsedRequirement
-
-            parsed_reqs = [ParsedRequirement.model_validate(r) for r in requirements]
-            project = self._project_service.apply_import(project_id, parsed_reqs)
-            return project.model_dump(mode="json")
-        except (ManagementPrdError, ValueError) as exc:
-            return _err(exc)
-
-    def apply_import_as_new_project(
-        self, name: str, requirements: list[dict[str, object]]
-    ) -> object:
-        """新建项目并导入需求（项目名取自导入文件名）。"""
-        try:
-            from management_prd.models.data import ParsedRequirement
-
-            parsed_reqs = [ParsedRequirement.model_validate(r) for r in requirements]
-            project = self._project_service.apply_import_as_new_project(name, parsed_reqs)
-            return project.model_dump(mode="json")
-        except (ManagementPrdError, ValueError) as exc:
-            return _err(exc)
-
     def parse_md_import(self) -> object:
         """弹打开文件框，解析 .md 双轨格式为 ParsedProject。
 
@@ -403,33 +357,6 @@ class WebApi:
             )
             return project.model_dump(mode="json")
         except (ManagementPrdError, ValueError) as exc:
-            return _err(exc)
-
-    def export_project(self, project_id: str) -> object:
-        """[旧版 .txt 导出] 导出项目为 .txt 文件（弹保存对话框）。
-
-        .. deprecated::
-            新版导出走 :meth:`export_project_md`（.md 双轨格式）。本方法保留至
-            第 7 步清理旧代码时移除，此处仅保持向后兼容的最小实现。
-        """
-        try:
-            project = self._project_service.get(project_id)
-            from management_prd.services.exporter import Exporter
-
-            exporter = Exporter()
-            # 旧 .txt 格式已废弃：这里复用快照导出 .md 文本作为最小兼容实现。
-            snapshot = self._project_service.get_full_snapshot(project_id)
-            content = exporter.export(snapshot)
-            suggested = exporter.suggested_filename(project.name)
-            picked = self._save_dialog(suggested)
-            if not picked:
-                return None
-            target = Path(picked)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
-            logger.info("需求已导出: %s", target)
-            return str(target)
-        except (ExportError, NotFoundError, StorageError, ValueError) as exc:
             return _err(exc)
 
     def export_project_md(self, project_id: str, include_bug: bool = True) -> object:
@@ -887,21 +814,6 @@ class WebApi:
         result = self._window.create_file_dialog(
             webview.OPEN_DIALOG,
             file_types=["Markdown 文件 (*.md)", "文本文件 (*.txt)", "所有文件 (*.*)"],
-        )
-        if not result:
-            return None
-        if isinstance(result, (list, tuple)):
-            return str(result[0]) if result else None
-        return str(result)
-
-    def _save_dialog(self, suggested: str) -> str | None:
-        """调用 webview 保存文件对话框，返回所选路径或 None。"""
-        if self._window is None:
-            raise ManagementPrdError("WebApi 窗口未注入，无法弹对话框")
-        result = self._window.create_file_dialog(
-            webview.SAVE_DIALOG,
-            save_filename=suggested,
-            file_types=["文本文件 (*.txt)", "所有文件 (*.*)"],
         )
         if not result:
             return None

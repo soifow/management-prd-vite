@@ -40,9 +40,7 @@ class Exporter:
             raise ExportError("项目名不能为空")
 
         fm = self._build_frontmatter(snapshot, include_bug=include_bug)
-        fm_text = yaml.safe_dump(
-            fm, allow_unicode=True, default_flow_style=False, sort_keys=False
-        )
+        fm_text = yaml.safe_dump(fm, allow_unicode=True, default_flow_style=False, sort_keys=False)
         body = self._render_body(snapshot, include_bug=include_bug)
         return f"---\n{fm_text}---\n{body}"
 
@@ -160,9 +158,7 @@ class Exporter:
             for b in sorted(snapshot.bugs, key=lambda x: x.date):
                 b_status_cn = "待修复" if b.status == "open" else "已修复"
                 anchor = b.id[:8]
-                lines.append(
-                    f"### {b.level} · {b.date.isoformat()} · {b_status_cn} {{#{anchor}}}"
-                )
+                lines.append(f"### {b.level} · {b.date.isoformat()} · {b_status_cn} {{#{anchor}}}")
                 if b.linked:
                     lines.append(f"关联迭代 {{#{b.linked[:8]}}}")
                 if b.content:
