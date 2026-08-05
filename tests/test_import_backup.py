@@ -23,14 +23,16 @@ import pytest
 from management_prd.errors import BackupError
 from management_prd.models.data import CreateRequirementInput
 from management_prd.models.requirement import RequirementStatus
+from management_prd.services.bootstrap_service import BootstrapService
 from management_prd.services.db_service import DbService
 from management_prd.services.importer import parse_import_md
 from management_prd.services.project_service import ProjectService, ProjectTarget
 
 
 @pytest.fixture()
-def db(tmp_path: Path) -> DbService:
-    service = DbService(db_path=tmp_path / "requment.db")
+def db(bootstrap: BootstrapService) -> DbService:
+    """使用 conftest 隔离的 bootstrap，settings.json / backups 均落 tmp_path，不触达真实用户目录。"""
+    service = DbService(bootstrap=bootstrap)
     service.init_db()
     return service
 

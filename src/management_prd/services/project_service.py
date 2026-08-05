@@ -868,20 +868,26 @@ class ProjectService:
                 )
                 iterations.append(it)
 
-            # subitems（按 iteration_id 分组）
-            sub_rows = conn.execute(
-                "SELECT * FROM requirement_subitems ORDER BY iteration_id, seq"
-            ).fetchall()
+            # subitems（按 iteration_id 分组，仅本项目迭代）
+            iter_ids = [it.id for it in iterations]
             sub_by_iter: dict[str, list[ParsedSubitem]] = {}
-            for r in sub_rows:
-                s_deadline = r["completion_deadline"]
-                sub = ParsedSubitem(
-                    seq=r["seq"],
-                    content=r["content"],
-                    status=RequirementStatus(r["status"]),
-                    completion_deadline=date.fromisoformat(s_deadline) if s_deadline else None,
-                )
-                sub_by_iter.setdefault(r["iteration_id"], []).append(sub)
+            if iter_ids:
+                placeholders = ",".join("?" * len(iter_ids))
+                sub_rows = conn.execute(
+                    f"SELECT * FROM requirement_subitems "
+                    f"WHERE iteration_id IN ({placeholders}) "
+                    f"ORDER BY iteration_id, seq",
+                    iter_ids,
+                ).fetchall()
+                for r in sub_rows:
+                    s_deadline = r["completion_deadline"]
+                    sub = ParsedSubitem(
+                        seq=r["seq"],
+                        content=r["content"],
+                        status=RequirementStatus(r["status"]),
+                        completion_deadline=date.fromisoformat(s_deadline) if s_deadline else None,
+                    )
+                    sub_by_iter.setdefault(r["iteration_id"], []).append(sub)
             for it in iterations:
                 it.subitems = sub_by_iter.get(it.id, [])
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -189,3 +190,79 @@ def test_partial_update_preserves_reminder_warning_fields(bootstrap: BootstrapSe
     assert updated.urgent_threshold_days == 1
     assert updated.reminder_warning_color == "#ff8800"
     assert updated.urgent_warning_color == "#ff0000"
+
+
+# ---------- Windows 偶发 PermissionError 重试 ----------
+
+
+def test_save_retries_on_transient_permission_error(
+    bootstrap: BootstrapService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """os.replace 前几次抛 PermissionError（模拟 Windows 杀毒/索引短暂占用）应重试成功。
+
+    必须在最底层的 ``os.replace`` 上注入故障——重试逻辑在 ``_atomic_replace`` 内部，
+    若直接替换 ``_atomic_replace`` 会绕过重试循环。
+    """
+    svc = SettingsService(bootstrap=bootstrap)
+    settings = svc.load()
+    settings.default_view_mode = "module"
+
+    import management_prd.services.settings_service as ss
+
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def flaky_replace(src: Path, dst: Path) -> None:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise PermissionError("simulated transient lock")
+        real_replace(src, dst)
+
+    # 缩短重试退避，避免测试空等
+    monkeypatch.setattr(ss, "_REPLACE_INITIAL_DELAY", 0.0)
+    monkeypatch.setattr(os, "replace", flaky_replace)
+    svc.save(settings)  # 不应抛
+
+    assert calls["n"] == 3  # 失败 2 次 + 成功 1 次
+    assert SettingsService(bootstrap=bootstrap).load().default_view_mode == "module"
+
+
+def test_save_raises_after_exhausting_retries(
+    bootstrap: BootstrapService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """os.replace 持续抛 PermissionError -> 重试耗尽 -> StorageError，且清理半成品 tmp。"""
+    from management_prd.errors import StorageError
+
+    svc = SettingsService(bootstrap=bootstrap)
+    settings = svc.load()
+
+    import management_prd.services.settings_service as ss
+
+    monkeypatch.setattr(ss, "_REPLACE_INITIAL_DELAY", 0.0)
+    monkeypatch.setattr(
+        os, "replace", lambda src, dst: (_ for _ in ()).throw(PermissionError("persist"))
+    )
+    with pytest.raises(StorageError):
+        svc.save(settings)
+    # 半成品 tmp 已清理
+    assert not (bootstrap.resolve_storage_dir() / "settings.json.tmp").exists()
+
+
+# ---------- 测试隔离回归：settings.json 不触达真实用户目录 ----------
+
+
+def test_settings_isolated_via_bootstrap_fixture(
+    bootstrap: BootstrapService, tmp_path: Path
+) -> None:
+    """回归：经 conftest bootstrap fixture 构造的 SettingsService，路径必须落在 tmp_path 下，
+    绝不触达真实用户目录（platformdirs %APPDATA%）。
+
+    防止 reintroduce ``DbService(db_path=...)`` 留下默认真实 bootstrap -> settings 写真实
+    用户目录的污染/偶发写入失败问题。
+    """
+    svc = SettingsService(bootstrap=bootstrap)
+    assert svc.path == tmp_path / "storage" / "settings.json"
+    # 写入后文件确实落在 tmp_path 内
+    svc.update_settings({"default_view_mode": "module"})
+    assert svc.path.is_relative_to(tmp_path)
+    assert svc.path.exists()

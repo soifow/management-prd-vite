@@ -1286,3 +1286,65 @@ def test_get_full_snapshot_roundtrip_shape(service: ProjectService) -> None:
     assert len(fm["iterations"]) == 1
     assert len(fm["bugs"]) == 1
     assert fm["bugs"][0]["linked"] == item.id
+
+
+def test_get_full_snapshot_subitems_scoped_to_project(service: ProjectService) -> None:
+    """回归：get_full_snapshot 的 subitems 查询必须按项目过滤，不能把其他项目的
+    子需求读入内存再丢弃（曾为全表扫描，多项目下无谓读取 + 潜在跨项目污染）。
+
+    建两个项目各一条迭代 + 子需求，断言每个快照只含本项目的子需求，且互不串。
+    """
+    from management_prd.models.data import CreateRequirementInput
+    from management_prd.models.subitem import CreateSubitemInput
+
+    pa = service.create_project("项目A")
+    pb = service.create_project("项目B")
+
+    item_a = service.create_requirement(
+        pa.id,
+        CreateRequirementInput(
+            module_names=["M"],
+            feature="功能A",
+            content="A 内容",
+            status=RequirementStatus.DONE,
+            date=date(2026, 1, 5),
+        ),
+    )
+    service.create_subitem(
+        CreateSubitemInput(
+            iteration_id=item_a.id, content="A 子需求", status=RequirementStatus.DONE
+        )
+    )
+
+    item_b = service.create_requirement(
+        pb.id,
+        CreateRequirementInput(
+            module_names=["M"],
+            feature="功能B",
+            content="B 内容",
+            status=RequirementStatus.TODO,
+            date=date(2026, 1, 6),
+        ),
+    )
+    service.create_subitem(
+        CreateSubitemInput(
+            iteration_id=item_b.id, content="B 子需求", status=RequirementStatus.TODO
+        )
+    )
+
+    snap_a = service.get_full_snapshot(pa.id)
+    snap_b = service.get_full_snapshot(pb.id)
+
+    # 各自只含本项目的一条子需求，不串
+    assert len(snap_a.iterations) == 1
+    assert len(snap_a.iterations[0].subitems) == 1
+    assert snap_a.iterations[0].subitems[0].content == "A 子需求"
+    assert len(snap_b.iterations) == 1
+    assert len(snap_b.iterations[0].subitems) == 1
+    assert snap_b.iterations[0].subitems[0].content == "B 子需求"
+
+    # 没有子需求的第三项目：空快照查询不应因空 iter_ids 报错
+    pc = service.create_project("项目C")
+    snap_c = service.get_full_snapshot(pc.id)
+    assert snap_c.iterations == []
+    assert snap_c.bugs == []

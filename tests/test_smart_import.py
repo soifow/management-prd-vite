@@ -29,6 +29,7 @@ from management_prd.models.data import (
     LlmParsedSubitem,
 )
 from management_prd.models.requirement import RequirementStatus
+from management_prd.services.bootstrap_service import BootstrapService
 from management_prd.services.db_service import DbService
 from management_prd.services.importer import (
     from_llm_intermediate,
@@ -204,8 +205,9 @@ def test_parse_llm_intermediate_invalid_enum_raises() -> None:
 
 
 @pytest.fixture()
-def service(tmp_path: Path) -> ProjectService:
-    db = DbService(db_path=tmp_path / "requment.db")
+def service(bootstrap: BootstrapService) -> ProjectService:
+    """使用 conftest 提供的隔离 bootstrap，settings.json 落 tmp_path，不触达真实用户目录。"""
+    db = DbService(bootstrap=bootstrap)
     db.init_db()
     return ProjectService(db)
 
@@ -274,8 +276,12 @@ def _mock_transport(return_args: dict[str, Any]) -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
-def _make_api(service: ProjectService, monkeypatch: pytest.MonkeyPatch, *, tmp: Path) -> Any:
-    """构造一个注入 mock transport 的 WebApi + LLM 已启用配置。"""
+def _make_api(service: ProjectService) -> tuple[Any, Any]:
+    """构造一个 WebApi + 已启用 LLM 的 SettingsService。
+
+    SettingsService 复用 ``service._bootstrap``（conftest 隔离到 tmp_path），
+    settings.json 落在 tmp_path 下，不触达真实用户目录。
+    """
     from management_prd.api import WebApi
     from management_prd.models.settings import AppSettings
     from management_prd.services.settings_service import SettingsService
@@ -303,7 +309,7 @@ def test_webapi_smart_import_success(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    api, _ = _make_api(service, monkeypatch, tmp=tmp_path)
+    api, _ = _make_api(service)
 
     # 准备一个临时输入文件
     doc = tmp_path / "doc.txt"
@@ -347,7 +353,7 @@ def test_webapi_smart_import_disabled_returns_error(
     tmp_path: Path,
 ) -> None:
     """未启用智能导入（llm_enabled=False）-> 错误信封，不弹文件框。"""
-    api, settings_svc = _make_api(service, monkeypatch, tmp=tmp_path)
+    api, settings_svc = _make_api(service)
     settings_svc.update_settings({"llm_enabled": False})
 
     called = {"open": False}
@@ -372,7 +378,7 @@ def test_webapi_smart_import_incomplete_config_returns_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    api, settings_svc = _make_api(service, monkeypatch, tmp=tmp_path)
+    api, settings_svc = _make_api(service)
     # 启用但缺 model
     settings_svc.update_settings({"llm_enabled": True, "llm_model": ""})
 
@@ -387,7 +393,7 @@ def test_webapi_smart_import_file_too_long(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    api, _ = _make_api(service, monkeypatch, tmp=tmp_path)
+    api, _ = _make_api(service)
     doc = tmp_path / "big.txt"
     doc.write_text("x" * (api._LLM_MAX_INPUT_CHARS + 1), encoding="utf-8")
     monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: str(doc))
@@ -404,7 +410,7 @@ def test_webapi_smart_import_llm_error(
     tmp_path: Path,
 ) -> None:
     """LLM 调用失败（HTTP 401）-> LlmError 被捕获为错误信封。"""
-    api, _ = _make_api(service, monkeypatch, tmp=tmp_path)
+    api, _ = _make_api(service)
     doc = tmp_path / "doc.txt"
     doc.write_text("内容", encoding="utf-8")
     monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: str(doc))
