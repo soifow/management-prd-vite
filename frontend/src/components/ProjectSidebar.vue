@@ -16,6 +16,7 @@ import {
 } from '@/constants/icons'
 import ProjectDialog from '@/components/ProjectDialog.vue'
 import ImportPreviewDialog from '@/components/ImportPreviewDialog.vue'
+import SmartImportDialog from '@/components/SmartImportDialog.vue'
 import type { ViewMode } from '@/types'
 import { formatDate } from '@/utils'
 import { useTemplateRef } from 'vue'
@@ -24,7 +25,7 @@ const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
 const settingsStore = useSettingsStore()
 const { summaries, activeProjectId } = storeToRefs(projectsStore)
-const { viewMode } = storeToRefs(requirementsStore)
+const { viewMode, smartImporting } = storeToRefs(requirementsStore)
 
 // 智能导入就绪：启用开关 + API 地址 / 密钥 / 模型 齐全
 const llmReady = computed(
@@ -50,6 +51,7 @@ const dialogMode = ref<'create' | 'rename'>('create')
 const dialogInitialName = ref('')
 
 const ImportPreviewDialogRef = useTemplateRef('importDialog')
+const SmartImportDialogRef = useTemplateRef('smartImportDialog')
 
 function openCreate() {
   dialogMode.value = 'create'
@@ -113,19 +115,13 @@ async function onImportAsNew() {
   }
 }
 
-// 智能导入：LLM 把任意文档识结构化为新项目（reuse_id=false 全新建）
+// 智能导入：开三步弹窗（①选择文件 → ②AI 分析 → ③预览并应用）
 async function onSmartImport() {
   if (!llmReady.value) {
     ElMessage.warning('请先在「设置 → 智能导入」中开启并配置 LLM')
     return
   }
-  try {
-    const result = await requirementsStore.smartImportFile()
-    if (!result) return
-    ImportPreviewDialogRef.value?.open(result.parsed, 'smart', result.filename)
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : '智能导入失败')
-  }
+  SmartImportDialogRef.value?.open()
 }
 </script>
 
@@ -170,6 +166,7 @@ async function onSmartImport() {
             size="small"
             class="action-btn"
             :disabled="!llmReady"
+            :loading="smartImporting"
             @click="onSmartImport"
           >
             <el-icon class="action-icon"><IPixelSparkles /></el-icon>
@@ -211,6 +208,7 @@ async function onSmartImport() {
       :project-id="dialogMode === 'rename' ? activeProjectId ?? '' : ''"
     />
     <ImportPreviewDialog ref="importDialog" />
+    <SmartImportDialog ref="smartImportDialog" />
   </div>
 </template>
 

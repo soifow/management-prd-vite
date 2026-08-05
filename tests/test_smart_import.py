@@ -1,4 +1,4 @@
-"""智能导入测试（Step 5）。
+"""智能导入测试（Step 5，已按 smart-import-progress 设计拆分为 pick/run 两段）。
 
 覆盖设计 §7 智能导入：
 1. ``from_llm_intermediate``：中间格式 -> ParsedProject 转换（模块/迭代/子需求/bug 映射、
@@ -6,8 +6,8 @@
 2. ``parse_llm_intermediate``：结构非法（缺必填 / 枚举越界）抛 ImportParseError。
 3. 端到端：LLM 返回中间格式 -> ParsedProject -> ``apply_full_import(reuse_id=False)``
    -> 断言需求 / 子需求 / bug 入库、bug 按 (feature,date) 关联、未配置 LLM 提示。
-4. ``WebApi.smart_import``：mock LlmClient + 注入 LLM 配置的 SettingsService -> 返回
-   ParsedProject；未启用 / 缺配置 / LLM 错误 / 大文件超长 各降级路径。
+4. ``WebApi.pick_smart_import_file`` / ``run_smart_import``：mock LlmClient + 注入 LLM 配置
+   的 SettingsService -> 拆段后各测；未启用 / 缺配置 / 大文件超长 / 取消返回 None 各降级路径。
 """
 
 from __future__ import annotations
@@ -245,7 +245,7 @@ def test_smart_import_generates_fresh_ids_each_call(service: ProjectService) -> 
         assert not it.id.startswith("llm-")
 
 
-# ── 4. WebApi.smart_import 集成（mock LLM transport + 注入 LLM 配置）──
+# ── 4. WebApi.pick_smart_import_file / run_smart_import 集成（mock LLM transport + 注入 LLM 配置）──
 
 
 def _mock_transport(return_args: dict[str, Any]) -> httpx.MockTransport:
@@ -304,18 +304,34 @@ def _make_api(service: ProjectService) -> tuple[Any, Any]:
     return api, settings_svc
 
 
-def test_webapi_smart_import_success(
+# ── pick + run 成功链路 ──
+
+
+def test_pick_smart_import_file_success(
     service: ProjectService,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """pick 返回 {filename, text, char_count}；LLM 配置有效且文件不超长。"""
     api, _ = _make_api(service)
 
-    # 准备一个临时输入文件
     doc = tmp_path / "doc.txt"
     doc.write_text("登录：实现微信登录\n支付：实现支付", encoding="utf-8")
-    # 劫持文件对话框返回该路径
     monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: str(doc))
+
+    result = api.pick_smart_import_file()
+    assert isinstance(result, dict)
+    assert result["filename"] == "doc"
+    assert "登录" in str(result["text"])
+    assert result["char_count"] == len("登录：实现微信登录\n支付：实现支付")
+
+
+def test_run_smart_import_success(
+    service: ProjectService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run 返回 {parsed, filename}；mock LLM 返回合法中间格式。"""
+    api, _ = _make_api(service)
 
     return_args = {
         "project_name": "智能项目",
@@ -330,7 +346,6 @@ def test_webapi_smart_import_success(
         ],
         "bugs": [],
     }
-    # monkeypatch LlmClient 注入 mock transport（替换 __init__ 的 transport 默认值）
     orig_init = LlmClient.__init__
 
     def patched_init(self: LlmClient, *args: Any, **kwargs: Any) -> None:
@@ -339,7 +354,7 @@ def test_webapi_smart_import_success(
 
     monkeypatch.setattr(LlmClient, "__init__", patched_init)
 
-    result = api.smart_import()
+    result = api.run_smart_import("登录：实现微信登录", "doc")
     assert isinstance(result, dict)
     assert "parsed" in result
     assert result["filename"] == "doc"
@@ -347,7 +362,10 @@ def test_webapi_smart_import_success(
     assert len(result["parsed"]["iterations"]) == 1
 
 
-def test_webapi_smart_import_disabled_returns_error(
+# ── pick：配置/文件校验 ──
+
+
+def test_pick_smart_import_file_disabled_returns_error(
     service: ProjectService,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -364,56 +382,67 @@ def test_webapi_smart_import_disabled_returns_error(
 
     monkeypatch.setattr(api, "_open_text_file", fake_open)
 
-    result = api.smart_import()
+    result = api.pick_smart_import_file()
     assert isinstance(result, dict)
     assert result.get("success") is False
-    # 错误信息提及未启用
     assert "未启用" in result.get("error", "")
-    # 不应弹文件框（在配置校验之前就拒绝）
     assert called["open"] is False
 
 
-def test_webapi_smart_import_incomplete_config_returns_error(
+def test_pick_smart_import_file_incomplete_config_returns_error(
     service: ProjectService,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """启用但缺 model -> 错误信封。"""
     api, settings_svc = _make_api(service)
-    # 启用但缺 model
     settings_svc.update_settings({"llm_enabled": True, "llm_model": ""})
 
-    result = api.smart_import()
+    result = api.pick_smart_import_file()
     assert isinstance(result, dict)
     assert result.get("success") is False
     assert "配置不完整" in result.get("error", "")
 
 
-def test_webapi_smart_import_file_too_long(
+def test_pick_smart_import_file_too_long(
     service: ProjectService,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """文件超过字符上限 -> 错误信封。"""
     api, _ = _make_api(service)
     doc = tmp_path / "big.txt"
     doc.write_text("x" * (api._LLM_MAX_INPUT_CHARS + 1), encoding="utf-8")
     monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: str(doc))
 
-    result = api.smart_import()
+    result = api.pick_smart_import_file()
     assert isinstance(result, dict)
     assert result.get("success") is False
     assert "文件过长" in result.get("error", "")
 
 
-def test_webapi_smart_import_llm_error(
+def test_pick_smart_import_file_cancel_returns_none(
     service: ProjectService,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """用户取消选文件 -> None。"""
+    api, _ = _make_api(service)
+    monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: None)
+
+    result = api.pick_smart_import_file()
+    assert result is None
+
+
+# ── run：LLM 错误 ──
+
+
+def test_run_smart_import_llm_error(
+    service: ProjectService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """LLM 调用失败（HTTP 401）-> LlmError 被捕获为错误信封。"""
     api, _ = _make_api(service)
-    doc = tmp_path / "doc.txt"
-    doc.write_text("内容", encoding="utf-8")
-    monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: str(doc))
 
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text="unauthorized")
@@ -426,7 +455,7 @@ def test_webapi_smart_import_llm_error(
 
     monkeypatch.setattr(LlmClient, "__init__", patched_init)
 
-    result = api.smart_import()
+    result = api.run_smart_import("内容", "doc")
     assert isinstance(result, dict)
     assert result.get("success") is False
     assert "认证失败" in result.get("error", "")

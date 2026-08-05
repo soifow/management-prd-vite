@@ -4,7 +4,7 @@
 
 import type { ApiErrorEnvelope, ImportBackupEntry } from './api'
 import type { BugItem, BugLinkInfo, BugStatus, CreateBugInput, UpdateBugInput } from './bug'
-import type { ImportTarget, ParseMdResult, ParsedProject } from './import'
+import type { ImportTarget, ParseMdResult, ParsedProject, SmartPickResult, SmartRunResult } from './import'
 import type { Module } from './module'
 import type { Project, ProjectSummary } from './project'
 import type { RequirementItem, RequirementStatus } from './requirement'
@@ -120,8 +120,13 @@ export interface PyWebViewApi {
     | { ok: true; model: string; reply: string }
     | ApiErrorEnvelope
   >
-  /** 智能导入：弹文件框 -> 读文本 -> LLM 结构化 -> ParsedProject（预览用）。取消返回 None。 */
-  smart_import(): Promise<ParseMdResult | null | ApiErrorEnvelope>
+  /** 智能导入第①步：校验 LLM 配置 -> 弹文件框 -> 读文本 -> 校验长度。取消返回 None。 */
+  pick_smart_import_file(): Promise<SmartPickResult | null | ApiErrorEnvelope>
+  /** 智能导入第②步：调 LLM 结构化 -> ParsedProject（预览用）。 */
+  run_smart_import(
+    text: string,
+    filename: string,
+  ): Promise<SmartRunResult | ApiErrorEnvelope>
 
   // ── 导入前备份与回滚 ──
   list_import_backups(): Promise<ImportBackupEntry[] | ApiErrorEnvelope>

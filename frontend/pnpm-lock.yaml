@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@lottiefiles/dotlottie-vue':
+        specifier: ^0.7.0
+        version: 0.7.2(vue@3.5.40(typescript@5.9.3))
       element-plus:
         specifier: ^2.14.3
         version: 2.14.3(vue@3.5.40(typescript@5.9.3))
@@ -527,6 +530,14 @@ packages:
 
   '@lezer/yaml@1.0.4':
     resolution: {integrity: sha512-2lrrHqxalACEbxIbsjhqGpSW8kWpUKuY6RHgnSAFZa6qK62wvnPxA8hGOwOoDbwHcOFs5M4o27mjGu+P7TvBmw==}
+
+  '@lottiefiles/dotlottie-vue@0.7.2':
+    resolution: {integrity: sha512-ePt8dBsmtCgNNTuf463YvM/kJgbQtPUgdwZaO7ODZPBdszrcA4YyiWmBFv31LB0bj+9FdyXLwTa+PDRLJ/+5WA==}
+    peerDependencies:
+      vue: ^3.3.4
+
+  '@lottiefiles/dotlottie-web@0.47.0':
+    resolution: {integrity: sha512-YN6wSB4iYZBYEAFKEs/taufrPH3rfNlUA632Ib61WoR58TALAJ1ZX8yDIGUBT28byMJhZR4+xdpRX4v7X8OeBQ==}
 
   '@lucide/vue@1.27.0':
     resolution: {integrity: sha512-LKDEZJ0Uo9UaT4vxBMYVwXeK/0dGcWCTdav1AK/aGD/jYsDPtiVvOgfM7jPlx9BVeyGZ1Uf0aQhHA++rmbe7rw==}
@@ -2756,6 +2767,13 @@ snapshots:
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.3
       '@lezer/lr': 1.4.10
+
+  '@lottiefiles/dotlottie-vue@0.7.2(vue@3.5.40(typescript@5.9.3))':
+    dependencies:
+      '@lottiefiles/dotlottie-web': 0.47.0
+      vue: 3.5.40(typescript@5.9.3)
+
+  '@lottiefiles/dotlottie-web@0.47.0': {}
 
   '@lucide/vue@1.27.0(vue@3.5.40(typescript@5.9.3))':
     dependencies:

@@ -8,7 +8,7 @@ Vue/Element Plus UI。**所有方法返回值必须是 JSON 可序列化的**（
     成功 -> 返回业务数据（dict / list / str / None / bool）
     失败 -> 返回 ``{"success": False, "error": "msg"}`` 统一错误信封
 
-对话框方法（``parse_md_import`` / ``smart_import`` / ``export_project_md`` 等）需要
+对话框方法（``parse_md_import`` / ``pick_smart_import_file`` / ``export_project_md`` 等）需要
 ``webview.Window``，由 :func:`app.run` 在 :func:`webview.create_window` 之后调用
 :func:`set_window` 注入。
 """
@@ -482,20 +482,15 @@ class WebApi:
         except (LlmError, ManagementPrdError, ValueError, TypeError) as exc:
             return _err(exc)
 
-    def smart_import(self) -> object:
-        """智能导入：弹文件框 -> 读文本 -> LLM 结构化 -> ParsedProject（预览用）。
+    def pick_smart_import_file(self) -> object:
+        """智能导入第①步：校验 LLM 配置 -> 弹文件框 -> 读文本 -> 校验长度。
 
-        ``LLM`` 配置取已落盘设置（``llm_enabled`` 须开启）。返回
-        ``{"parsed": {...}, "filename": "xxx"}`` 供前端预览弹窗；取消返回 None。
+        返回 ``{"filename": "...", "text": "...", "char_count": N}`` 供前端在②里的
+        ``run_smart_import`` 使用；取消选文件返回 ``None``。
 
-        错误降级（设计 §7.5）：未配置/未启用 LLM、文件过长、LLM 调用失败、返回格式
-        非法均返回错误信封，不写入。
+        错误降级（设计 §7.5）：未启用/配置不完整、文件过长返回错误信封，不弹 LLM。
         """
         try:
-            from management_prd.llm.client import LlmClient
-            from management_prd.llm.prompt import build_messages
-            from management_prd.services.importer import parse_llm_intermediate
-
             settings = self._settings_service.load()
             if not settings.llm_enabled:
                 raise LlmError("智能导入未启用，请在设置中开启")
@@ -514,6 +509,32 @@ class WebApi:
                 raise LlmError(
                     f"文件过长（{len(text)} 字符，上限 {self._LLM_MAX_INPUT_CHARS}），请拆分后重试"
                 )
+            return {
+                "filename": path.stem,
+                "text": text,
+                "char_count": len(text),
+            }
+        except (LlmError, ManagementPrdError, ValueError, TypeError) as exc:
+            return _err(exc)
+
+    def run_smart_import(self, text: str, filename: str) -> object:
+        """智能导入第②步：调 LLM 结构化 -> ParsedProject（预览用）。
+
+        ``text`` / ``filename`` 来自第①步 ``pick_smart_import_file`` 的返回值。返回
+        ``{"parsed": {...}, "filename": "..."}`` 供前端预览弹窗。
+
+        错误降级（设计 §7.5）：LLM 调用失败、返回格式非法返回错误信封，不写入。
+        """
+        try:
+            from management_prd.llm.client import LlmClient
+            from management_prd.llm.prompt import build_messages
+            from management_prd.services.importer import parse_llm_intermediate
+
+            settings = self._settings_service.load()
+            if not settings.llm_enabled:
+                raise LlmError("智能导入未启用，请在设置中开启")
+            if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
+                raise LlmError("智能导入配置不完整：请在设置中填写 API 地址 / 密钥 / 模型")
 
             client = LlmClient(
                 base_url=settings.llm_base_url,
@@ -521,12 +542,12 @@ class WebApi:
                 model=settings.llm_model,
                 timeout=settings.llm_timeout,
             )
-            messages = build_messages(text, path.stem)
+            messages = build_messages(text, filename)
             intermediate = client.chat_structured(messages)
             parsed = parse_llm_intermediate(intermediate)
             return {
                 "parsed": parsed.model_dump(mode="json"),
-                "filename": path.stem,
+                "filename": filename,
             }
         except (LlmError, ManagementPrdError, ValueError, TypeError) as exc:
             return _err(exc)

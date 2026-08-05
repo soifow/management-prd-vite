@@ -88,3 +88,17 @@ export interface ParseMdResult {
   parsed: ParsedProject
   filename: string
 }
+
+/** pick_smart_import_file 返回结果：第①步已选文件（文本 + 字符数），供第②步 run 使用。
+ *  取消选文件后端返回 None。 */
+export interface SmartPickResult {
+  filename: string
+  text: string
+  char_count: number
+}
+
+/** run_smart_import 返回结果：LLM 结构化出的项目快照 + 文件名。 */
+export interface SmartRunResult {
+  parsed: ParsedProject
+  filename: string
+}

@@ -11,7 +11,13 @@ import type {
   CreateBugInput,
   UpdateBugInput,
 } from '@/types/bug'
-import type { ImportTarget, ParseMdResult, ParsedProject } from '@/types/import'
+import type {
+  ImportTarget,
+  ParseMdResult,
+  ParsedProject,
+  SmartPickResult,
+  SmartRunResult,
+} from '@/types/import'
 import type { Module } from '@/types/module'
 import type { Project, ProjectSummary } from '@/types/project'
 import type { RequirementItem, RequirementStatus } from '@/types/requirement'
@@ -205,10 +211,14 @@ export const applyFullImport = (
   parsed: ParsedProject,
 ): Promise<Project> => invoke(() => bridge().apply_full_import(target, parsed))
 
-/** 智能导入：弹文件框 -> 后端调 LLM 结构化 -> ParsedProject（预览用）。取消返回 null。
- *  智能导入数据无原始 ID，提交时 reuse_id=false（全新建），由 store 在打开预览时注入。 */
-export const smartImport = (): Promise<ParseMdResult | null> =>
-  invoke(() => bridge().smart_import())
+/** 智能导入第①步：校验配置 -> 弹文件框 -> 读文本 -> 校验长度。取消返回 null。 */
+export const pickSmartImportFile = (): Promise<SmartPickResult | null> =>
+  invoke(() => bridge().pick_smart_import_file())
+
+/** 智能导入第②步：调 LLM 结构化 -> ParsedProject（预览用）。
+ *  智能导入数据无原始 ID，提交时 reuse_id=false（全新建），由 ImportPreviewPanel 注入。 */
+export const runSmartImport = (text: string, filename: string): Promise<SmartRunResult> =>
+  invoke(() => bridge().run_smart_import(text, filename))
 
 /** 导出项目为 .md 双轨格式（frontmatter 权威 + 正文渲染）。include_bug 决定是否含 bug 段。 */
 export const exportProjectMd = (projectId: string, includeBug: boolean): Promise<string | null> =>

@@ -17,9 +17,10 @@ import {
   listModules,
   listSubitems,
   parseMdImport,
+  pickSmartImportFile as pickSmartImportFileApi,
+  runSmartImport as runSmartImportApi,
   setRequirementStatus,
   setSubitemStatus,
-  smartImport,
   updateRequirement,
   updateSubitem,
 } from '@/api'
@@ -32,6 +33,8 @@ import type {
   RequirementItem,
   RequirementStatus,
   RequirementSubitem,
+  SmartPickResult,
+  SmartRunResult,
 } from '@/types'
 import type { Module } from '@/types/module'
 import type { ViewMode } from '@/types/settings'
@@ -292,10 +295,18 @@ export const useRequirementsStore = defineStore('requirements', () => {
     return await parseMdImport()
   }
 
-  /** 智能导入：弹文件框 -> 后端 LLM 结构化 -> ParsedProject（预览用）。取消返回 null。
-   *  智能导入数据无原始 ID，提交时 reuse_id=false；调用方在打开预览弹窗时由 mode 触发注入。 */
-  async function smartImportFile(): Promise<ParseMdResult | null> {
-    return await smartImport()
+  /** 智能导入是否进行中（①→②→③ 全程 true，关弹窗复位）。侧边栏按钮据此 :loading 防重入，
+   *  由 SmartImportDialog 在 open/close 置位。 */
+  const smartImporting = ref(false)
+
+  /** 智能导入第①步：弹文件框 -> 读文本 -> 校验长度。取消返回 null。 */
+  async function pickSmartImportFile(): Promise<SmartPickResult | null> {
+    return await pickSmartImportFileApi()
+  }
+
+  /** 智能导入第②步：调 LLM 结构化 -> ParsedProject（预览用）。 */
+  async function runSmartImport(text: string, filename: string): Promise<SmartRunResult> {
+    return await runSmartImportApi(text, filename)
   }
 
   /** 应用完整导入到目标项目（基础导入 target=project_id 或新建 name；reuse_id 由 parsed 携带）。 */
@@ -352,7 +363,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     removeSubitem,
     parseImport,
     applyFullImportTo,
-    smartImportFile,
+    smartImporting,
+    pickSmartImportFile,
+    runSmartImport,
     exportCurrent,
     listFeatures,
   }
