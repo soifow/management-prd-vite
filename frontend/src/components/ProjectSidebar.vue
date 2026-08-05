@@ -7,12 +7,12 @@ import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
 import { useSettingsStore } from '@/stores/settings'
 import {
+  IPixelDownload,
   IPixelFolderPlus,
   IPixelPencil,
   IPixelPlus,
   IPixelSparkles,
   IPixelTrash,
-  IPixelUpload,
 } from '@/constants/icons'
 import ProjectDialog from '@/components/ProjectDialog.vue'
 import ImportPreviewDialog from '@/components/ImportPreviewDialog.vue'
@@ -160,7 +160,7 @@ async function onSmartImport() {
         :disabled="!activeProjectId"
         @click="onImportCurrent"
       >
-        <el-icon class="action-icon"><IPixelUpload /></el-icon>
+        <el-icon class="action-icon"><IPixelDownload /></el-icon>
         <span>导入当前项目</span>
       </el-button>
       <el-tooltip :content="smartImportTooltip" placement="right" :show-after="400">

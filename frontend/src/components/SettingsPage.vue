@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { IPixelFolder, IPixelSortVertical } from '@/constants/icons'
+import { IPixelCheck, IPixelClose, IPixelFolder, IPixelSortVertical } from '@/constants/icons'
 
 import { useSettingsStore } from '@/stores/settings'
 import { testLlm, whenReady } from '@/api'
@@ -55,31 +55,42 @@ const draftOrder = ref<string[]>([...settingsOrder.value])
 const dragKey = ref<string | null>(null)
 const dragOverKey = ref<string | null>(null)
 
-// 提醒设置草稿（保存时一并落盘）
-const draftThreshold = ref(settingsStore.reminderThresholdDays)
-const draftUrgentThreshold = ref(settingsStore.urgentThresholdDays)
-const draftReminderColor = ref(settingsStore.reminderWarningColor)
-const draftUrgentColor = ref(settingsStore.urgentWarningColor)
-const draftShowNoDeadline = ref(settingsStore.showNoDeadlineInTodo)
+// 草稿统一在 onMounted 中从「已加载的后端设置」初始化，避免组件 setup 早于
+// App.vue 的 loadSettings() 完成时把草稿锁定为默认值（导致展示与配置文件不一致、
+// 保存后把默认值回写覆盖真值）。先用 null 占位，模板在初始化完成前不渲染表单。
+const draftThreshold = ref<number | null>(null)
+const draftUrgentThreshold = ref<number | null>(null)
+const draftReminderColor = ref<string | null>(null)
+const draftUrgentColor = ref<string | null>(null)
+const draftShowNoDeadline = ref<boolean | null>(null)
 // 子需求进度草稿
-const draftShowSubitemProgress = ref(settingsStore.showSubitemProgressInTree)
+const draftShowSubitemProgress = ref<boolean | null>(null)
 // LLM 智能导入配置草稿
-const draftLlmEnabled = ref(settingsStore.llmEnabled)
-const draftLlmBaseUrl = ref(settingsStore.llmBaseUrl)
-const draftLlmApiKey = ref(settingsStore.llmApiKey)
-const draftLlmModel = ref(settingsStore.llmModel)
-const draftLlmTimeout = ref(settingsStore.llmTimeout)
+const draftLlmEnabled = ref<boolean | null>(null)
+const draftLlmBaseUrl = ref<string | null>(null)
+const draftLlmApiKey = ref<string | null>(null)
+const draftLlmModel = ref<string | null>(null)
+const draftLlmTimeout = ref<number | null>(null)
 const testingLlm = ref(false)
+// 测试连接结果（常驻展示，避免 toast 一闪而过用户看不到）。null=未测试过。
+type LlmTestResult = {
+  status: 'success' | 'error'
+  model?: string
+  reply?: string
+  error?: string
+  at: number
+}
+const llmTestResult = ref<LlmTestResult | null>(null)
 // 导入备份保留数量草稿
-const draftBackupRetention = ref(settingsStore.backupRetentionCount)
+const draftBackupRetention = ref<number | null>(null)
 
 // 项目列表日期口径草稿（保存时一并落盘）
-const draftProjectListDateMode = ref<ProjectListDateMode>(settingsStore.projectListDateMode)
+const draftProjectListDateMode = ref<ProjectListDateMode | null>(null)
 
 // 紧急阈值必定 ≤ 提醒阈值：当提醒阈值被下调到低于当前紧急阈值时，
 // 自动把紧急阈值对齐到提醒阈值（后端校验器同样拒绝前者 > 后者）。
 watch(draftThreshold, (t) => {
-  if (draftUrgentThreshold.value > t) {
+  if (t !== null && draftUrgentThreshold.value !== null && draftUrgentThreshold.value > t) {
     draftUrgentThreshold.value = t
   }
 })
@@ -100,11 +111,36 @@ const sortedGroups = computed(() =>
 const activeKey = ref<string>(GROUPS[0].key)
 const scrollRef = useTemplateRef<HTMLDivElement>('scrollRef')
 
+// 草稿是否已从后端初始化完成（false 时表单不渲染，避免 null 默认值闪现）
+const draftsReady = ref(false)
+
 onMounted(async () => {
   // 视图用 v-show 常驻、应用挂载即触发本钩子；须先等待桥接就绪再调后端，
   // 否则与 App.vue 的 whenReady 并发执行时桥接尚未注入会抛 ApiError。
   await whenReady()
   await settingsStore.loadStorageInfo()
+  // 主动从配置文件加载最新设置，并用其初始化草稿——保证展示值与配置文件一致，
+  // 不受 App.vue 启动时 loadSettings() 的时序影响（避免草稿被默认值锁定）。
+  // 读取失败时仍用 store 当前值填充草稿并渲染表单（至少可编辑），同时提示。
+  try {
+    await settingsStore.loadSettings()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '加载设置失败，已使用当前缓存值')
+  }
+  draftThreshold.value = settingsStore.reminderThresholdDays
+  draftUrgentThreshold.value = settingsStore.urgentThresholdDays
+  draftReminderColor.value = settingsStore.reminderWarningColor
+  draftUrgentColor.value = settingsStore.urgentWarningColor
+  draftShowNoDeadline.value = settingsStore.showNoDeadlineInTodo
+  draftShowSubitemProgress.value = settingsStore.showSubitemProgressInTree
+  draftLlmEnabled.value = settingsStore.llmEnabled
+  draftLlmBaseUrl.value = settingsStore.llmBaseUrl
+  draftLlmApiKey.value = settingsStore.llmApiKey
+  draftLlmModel.value = settingsStore.llmModel
+  draftLlmTimeout.value = settingsStore.llmTimeout
+  draftBackupRetention.value = settingsStore.backupRetentionCount
+  draftProjectListDateMode.value = settingsStore.projectListDateMode
+  draftsReady.value = true
   // 备份清单容错加载：失败不阻断设置页其余初始化
   void settingsStore.loadImportBackups().catch(() => {
     /* 忽略：备份 manifest 读取失败不阻断设置页 */
@@ -213,21 +249,34 @@ async function onChangeStorage() {
 
 // 测试 LLM 连接：用表单草稿（未保存也能测），成功后提示
 async function onTestLlm() {
-  if (!draftLlmBaseUrl.value.trim() || !draftLlmModel.value.trim()) {
+  // 表单渲染（draftsReady）后才可能触发；收窄类型并兜底
+  const baseUrl = draftLlmBaseUrl.value ?? ''
+  const model = draftLlmModel.value ?? ''
+  if (!baseUrl.trim() || !model.trim()) {
     ElMessage.warning('请先填写 API 地址与模型名')
     return
   }
   testingLlm.value = true
   try {
     const result = await testLlm({
-      base_url: draftLlmBaseUrl.value.trim(),
-      api_key: draftLlmApiKey.value.trim(),
-      model: draftLlmModel.value.trim(),
-      timeout: draftLlmTimeout.value,
+      base_url: baseUrl.trim(),
+      api_key: (draftLlmApiKey.value ?? '').trim(),
+      model: model.trim(),
+      timeout: draftLlmTimeout.value ?? 120,
     })
-    const reply = result.reply ? ` 回复：${result.reply}` : ''
-    ElMessage.success(`连接成功（${result.model}）${reply}`)
+    llmTestResult.value = {
+      status: 'success',
+      model: result.model,
+      reply: result.reply,
+      at: Date.now(),
+    }
+    ElMessage.success('连接成功')
   } catch (e) {
+    llmTestResult.value = {
+      status: 'error',
+      error: e instanceof Error ? e.message : String(e),
+      at: Date.now(),
+    }
     ElMessage.error(e instanceof Error ? e.message : '连接失败')
   } finally {
     testingLlm.value = false
@@ -236,29 +285,66 @@ async function onTestLlm() {
 
 // 保存：落盘「默认聚合方式」+「项目列表日期口径」+「提醒设置」+「LLM 配置」，
 // 不回写主界面当前视图（二者解耦：默认值只在冷启动生效）
+const saving = ref(false)
 async function onSave() {
+  if (saving.value) return
+  saving.value = true
   try {
-    await settingsStore.saveDefaultViewMode(defaultViewMode.value as ViewMode)
-    await settingsStore.saveProjectListDateMode(draftProjectListDateMode.value)
-    await settingsStore.saveReminderSettings(
-      draftThreshold.value,
-      draftUrgentThreshold.value,
-      draftReminderColor.value,
-      draftUrgentColor.value,
-      draftShowNoDeadline.value,
-    )
-    await settingsStore.saveSubitemProgressInTree(draftShowSubitemProgress.value)
-    await settingsStore.saveLlmConfig({
-      enabled: draftLlmEnabled.value,
-      baseUrl: draftLlmBaseUrl.value.trim(),
-      apiKey: draftLlmApiKey.value.trim(),
-      model: draftLlmModel.value.trim(),
-      timeout: draftLlmTimeout.value,
-    })
-    await settingsStore.saveBackupRetentionCount(draftBackupRetention.value)
+    const steps: Array<{ name: string; run: () => Promise<unknown> }> = [
+      {
+        name: '默认聚合方式',
+        run: () =>
+          settingsStore.saveDefaultViewMode(defaultViewMode.value as ViewMode),
+      },
+      {
+        name: '项目列表日期口径',
+        run: () => settingsStore.saveProjectListDateMode(draftProjectListDateMode.value!),
+      },
+      {
+        name: '提醒设置',
+        run: () =>
+          settingsStore.saveReminderSettings(
+            draftThreshold.value!,
+            draftUrgentThreshold.value!,
+            draftReminderColor.value!,
+            draftUrgentColor.value!,
+            draftShowNoDeadline.value!,
+          ),
+      },
+      {
+        name: '子需求进度',
+        run: () => settingsStore.saveSubitemProgressInTree(draftShowSubitemProgress.value!),
+      },
+      {
+        name: '智能导入配置',
+        run: () =>
+          settingsStore.saveLlmConfig({
+            enabled: draftLlmEnabled.value!,
+            baseUrl: draftLlmBaseUrl.value!.trim(),
+            apiKey: draftLlmApiKey.value!.trim(),
+            model: draftLlmModel.value!.trim(),
+            timeout: draftLlmTimeout.value!,
+          }),
+      },
+      {
+        name: '备份保留数量',
+        run: () => settingsStore.saveBackupRetentionCount(draftBackupRetention.value!),
+      },
+    ]
+    for (const step of steps) {
+      try {
+        await step.run()
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        // 单步失败立即终止，明确告知用户是哪一项保存失败，已保存的前序项保留。
+        ElMessage.error(`保存失败（${step.name}）：${msg}`)
+        return
+      }
+    }
+    ElMessage.success('设置已保存')
     emit('save')
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : '保存设置失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -340,7 +426,7 @@ async function onDeleteBackup(id: string, createdAt: string) {
       <h2 class="page-title">设置</h2>
     </header>
 
-    <div class="settings-body">
+    <div v-if="draftsReady" class="settings-body">
       <!-- 左：分组标签 -->
       <div class="tabs">
         <div
@@ -427,7 +513,7 @@ async function onDeleteBackup(id: string, createdAt: string) {
                     :value="opt.value"
                   />
                 </el-select>
-                <p class="field-hint date-mode-desc">{{ dateModeDesc }}</p>
+                <span v-if="dateModeDesc" class="field-hint">{{ dateModeDesc }}</span>
               </el-form-item>
             </el-form>
           </template>
@@ -497,7 +583,7 @@ async function onDeleteBackup(id: string, createdAt: string) {
             <el-form label-position="top">
               <el-form-item label="启用智能导入">
                 <el-switch v-model="draftLlmEnabled" />
-                <span class="field-hint">开启后侧边栏出现「智能导入」入口</span>
+                <span class="field-hint">开启后允许使用智能导入</span>
               </el-form-item>
               <el-form-item label="API 地址">
                 <el-input
@@ -541,12 +627,44 @@ async function onDeleteBackup(id: string, createdAt: string) {
                   type="primary"
                   plain
                   :loading="testingLlm"
-                  :disabled="!draftLlmEnabled || !draftLlmBaseUrl.trim() || !draftLlmModel.trim()"
+                  :disabled="!draftLlmEnabled || !(draftLlmBaseUrl || '').trim() || !(draftLlmModel || '').trim()"
                   @click="onTestLlm"
                 >
                   测试连接
                 </el-button>
                 <span class="field-hint">验证 API 地址、密钥与模型是否可用</span>
+              </el-form-item>
+              <el-form-item v-if="llmTestResult">
+                <div
+                  class="llm-test-result"
+                  :class="llmTestResult.status === 'success' ? 'is-success' : 'is-error'"
+                >
+                  <el-icon v-if="llmTestResult.status === 'success'"><IPixelCheck /></el-icon>
+                  <el-icon v-else><IPixelClose /></el-icon>
+                  <div class="llm-test-text">
+                    <template v-if="llmTestResult.status === 'success'">
+                      <span class="llm-test-title">连接成功</span>
+                      <span v-if="llmTestResult.model" class="llm-test-detail">
+                        模型：{{ llmTestResult.model }}
+                      </span>
+                      <span v-if="llmTestResult.reply" class="llm-test-reply">
+                        回复：{{ llmTestResult.reply }}
+                      </span>
+                    </template>
+                    <template v-else>
+                      <span class="llm-test-title">连接失败</span>
+                      <span class="llm-test-detail">{{ llmTestResult.error }}</span>
+                    </template>
+                  </div>
+                  <el-button
+                    size="small"
+                    text
+                    class="llm-test-dismiss"
+                    @click="llmTestResult = null"
+                  >
+                    关闭
+                  </el-button>
+                </div>
               </el-form-item>
             </el-form>
           </template>
@@ -613,11 +731,11 @@ async function onDeleteBackup(id: string, createdAt: string) {
     </div>
 
     <footer class="page-footer">
-      <el-button @click="onToggleOrder">
+      <el-button :disabled="!draftsReady" @click="onToggleOrder">
         <el-icon><IPixelSortVertical /></el-icon>
         {{ editingOrder ? '完成' : '顺序' }}
       </el-button>
-      <el-button type="primary" @click="onSave">保存</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!draftsReady" @click="onSave">保存</el-button>
     </footer>
   </section>
 </template>
@@ -741,11 +859,53 @@ async function onDeleteBackup(id: string, createdAt: string) {
   color: #9ca3af;
   line-height: 1.6;
 }
-/* 日期口径说明：独立一行，紧贴下拉框下方 */
-.date-mode-desc {
-  margin-left: 0;
-  margin-top: 8px;
-  margin-bottom: 0;
+/* LLM 测试连接结果区：常驻展示（成功绿/失败红），避免 toast 一闪而过 */
+.llm-test-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.llm-test-result.is-success {
+  background: #f0f9eb;
+  border: 1px solid #e1f3d8;
+  color: #67c23a;
+}
+.llm-test-result.is-error {
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+  color: #f56c6c;
+}
+.llm-test-result .el-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.llm-test-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  word-break: break-word;
+}
+.llm-test-title {
+  font-weight: 600;
+}
+.llm-test-detail {
+  color: #6b7280;
+  font-size: 12px;
+}
+.llm-test-reply {
+  color: #6b7280;
+  font-size: 12px;
+}
+.llm-test-dismiss {
+  flex-shrink: 0;
+  align-self: flex-start;
 }
 .page-footer {
   flex-shrink: 0;

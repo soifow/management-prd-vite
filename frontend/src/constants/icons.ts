@@ -6,6 +6,8 @@
 import IPixelAppWindows from '~icons/pixelarticons/app-windows'
 import IPixelBell from '~icons/pixelarticons/bell'
 import IPixelBellOff from '~icons/pixelarticons/bell-off'
+import IPixelCheck from '~icons/pixelarticons/check'
+import IPixelClose from '~icons/pixelarticons/close'
 import IPixelDebug from '~icons/pixelarticons/debug'
 import IPixelDownload from '~icons/pixelarticons/download'
 import IPixelFolder from '~icons/pixelarticons/folder'
@@ -24,6 +26,8 @@ export {
   IPixelAppWindows,
   IPixelBell,
   IPixelBellOff,
+  IPixelCheck,
+  IPixelClose,
   IPixelDebug,
   IPixelDownload,
   IPixelFolder,

@@ -8,7 +8,7 @@ import type { RequirementStatus } from '@/types'
 import { STATUS_LABEL } from '@/types/requirement'
 import RequirementEditDialog from '@/components/RequirementEditDialog.vue'
 import ExportDialog from '@/components/ExportDialog.vue'
-import { IPixelDownload, IPixelPlus } from '@/constants/icons'
+import { IPixelPlus, IPixelUpload } from '@/constants/icons'
 import { ref } from 'vue'
 
 const store = useRequirementsStore()
@@ -94,7 +94,7 @@ async function onExport() {
 
     <div class="spacer" />
 
-    <el-button :icon="IPixelDownload" @click="onExport" :disabled="!project">导出</el-button>
+    <el-button :icon="IPixelUpload" @click="onExport" :disabled="!project">导出</el-button>
     <el-button :icon="IPixelPlus" type="primary" @click="openCreate" :disabled="!project">
       需求
     </el-button>
