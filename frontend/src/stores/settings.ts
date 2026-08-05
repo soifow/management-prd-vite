@@ -1,10 +1,19 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-import { getSettings, getStorageInfo, migrateStorage, pickStorageDir, updateSettings } from '@/api'
+import {
+  deleteImportBackup,
+  getSettings,
+  getStorageInfo,
+  listImportBackups,
+  migrateStorage,
+  pickStorageDir,
+  restoreImportBackup,
+  updateSettings,
+} from '@/api'
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
-import type { StorageInfo } from '@/types/api'
+import type { ImportBackupEntry, StorageInfo } from '@/types/api'
 import type { ProjectListDateMode, ViewMode } from '@/types/settings'
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -35,6 +44,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const llmApiKey = ref('')
   const llmModel = ref('')
   const llmTimeout = ref(120)
+  // 导入备份自动清理保留数量
+  const backupRetentionCount = ref(10)
+  // 导入前备份清单（最新在前）
+  const importBackups = ref<ImportBackupEntry[]>([])
 
   async function loadStorageInfo() {
     loading.value = true
@@ -53,7 +66,7 @@ export const useSettingsStore = defineStore('settings', () => {
     settingsOrder.value =
       settings.settings_order && settings.settings_order.length > 0
         ? settings.settings_order
-        : ['storage', 'display', 'reminder', 'subitem', 'llm']
+        : ['storage', 'display', 'reminder', 'subitem', 'llm', 'backup']
     reminderThresholdDays.value = settings.reminder_threshold_days
     urgentThresholdDays.value = settings.urgent_threshold_days
     reminderWarningColor.value = settings.reminder_warning_color
@@ -65,6 +78,7 @@ export const useSettingsStore = defineStore('settings', () => {
     llmApiKey.value = settings.llm_api_key
     llmModel.value = settings.llm_model
     llmTimeout.value = settings.llm_timeout
+    backupRetentionCount.value = settings.backup_retention_count
   }
 
   /** 修改默认聚合方式并落盘。 */
@@ -139,6 +153,43 @@ export const useSettingsStore = defineStore('settings', () => {
     llmTimeout.value = settings.llm_timeout
   }
 
+  // ── 导入前备份与回滚 ──
+
+  /** 修改导入备份保留数量并落盘。 */
+  async function saveBackupRetentionCount(count: number) {
+    const settings = await updateSettings({ backup_retention_count: count })
+    backupRetentionCount.value = settings.backup_retention_count
+  }
+
+  /** 加载导入前备份清单（最新在前）。 */
+  async function loadImportBackups() {
+    importBackups.value = await listImportBackups()
+  }
+
+  /**
+   * 回滚到指定导入前备份点。回滚后数据库已被覆盖，需全量刷新前端数据视图：
+   * 项目列表 + 当前项目（当前项目回滚后可能已不存在，缺失则重置）+ 备份清单。
+   */
+  async function restoreImportBackupById(id: string) {
+    await restoreImportBackup(id)
+    const projectsStore = useProjectsStore()
+    const requirementsStore = useRequirementsStore()
+    await projectsStore.loadSummaries()
+    const activeId = projectsStore.activeProjectId
+    if (activeId && projectsStore.summaries.some((p) => p.id === activeId)) {
+      await requirementsStore.loadProject(activeId)
+    } else {
+      requirementsStore.reset()
+    }
+    await loadImportBackups()
+  }
+
+  /** 删除单个导入备份并刷新清单。 */
+  async function deleteImportBackupById(id: string) {
+    await deleteImportBackup(id)
+    await loadImportBackups()
+  }
+
   /** 弹文件夹选择框，返回所选路径或 null（取消）。 */
   async function pickFolder(): Promise<string | null> {
     return await pickStorageDir()
@@ -180,6 +231,8 @@ export const useSettingsStore = defineStore('settings', () => {
     llmApiKey,
     llmModel,
     llmTimeout,
+    backupRetentionCount,
+    importBackups,
     loadStorageInfo,
     loadSettings,
     saveDefaultViewMode,
@@ -188,6 +241,10 @@ export const useSettingsStore = defineStore('settings', () => {
     saveReminderSettings,
     saveSubitemProgressInTree,
     saveLlmConfig,
+    saveBackupRetentionCount,
+    loadImportBackups,
+    restoreImportBackupById,
+    deleteImportBackupById,
     pickFolder,
     migrate,
   }

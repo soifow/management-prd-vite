@@ -3,7 +3,7 @@
  */
 
 import { isApiErrorEnvelope } from '@/types/api'
-import type { StorageInfo } from '@/types/api'
+import type { ImportBackupEntry, StorageInfo } from '@/types/api'
 import type {
   BugItem,
   BugLinkInfo,
@@ -215,6 +215,20 @@ export const smartImport = (): Promise<ParseMdResult | null> =>
 /** 导出项目为 .md 双轨格式（frontmatter 权威 + 正文渲染）。include_bug 决定是否含 bug 段。 */
 export const exportProjectMd = (projectId: string, includeBug: boolean): Promise<string | null> =>
   invoke(() => bridge().export_project_md(projectId, includeBug))
+
+// ── 导入前备份与回滚 ──────────────────────────────────────
+
+/** 返回导入前备份清单（最新在前）。 */
+export const listImportBackups = (): Promise<ImportBackupEntry[]> =>
+  invoke(() => bridge().list_import_backups())
+
+/** 回滚到指定导入前备份点（破坏性，覆盖当前库）。 */
+export const restoreImportBackup = (backupId: string): Promise<boolean> =>
+  invoke(() => bridge().restore_backup(backupId))
+
+/** 删除单个导入前备份。 */
+export const deleteImportBackup = (backupId: string): Promise<boolean> =>
+  invoke(() => bridge().delete_backup(backupId))
 
 // ── 存储位置 ──────────────────────────────────────────────
 

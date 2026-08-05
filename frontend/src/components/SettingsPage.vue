@@ -15,7 +15,8 @@ const emit = defineEmits<{
 }>()
 
 const settingsStore = useSettingsStore()
-const { storageInfo, loading, defaultViewMode, settingsOrder } = storeToRefs(settingsStore)
+const { storageInfo, loading, defaultViewMode, settingsOrder, importBackups } =
+  storeToRefs(settingsStore)
 
 // 分组注册表（未来追加分组只需在此扩展，合法 key 由此决定）
 const GROUPS = [
@@ -24,6 +25,7 @@ const GROUPS = [
   { key: 'reminder', label: '提醒设置' },
   { key: 'subitem', label: '子需求进度' },
   { key: 'llm', label: '智能导入' },
+  { key: 'backup', label: '数据备份与回滚' },
 ] as const
 // 全部已注册分组的 key（规范化顺序与拖拽重排的合法集合；新增分组自动纳入）
 const GROUP_KEYS = GROUPS.map((g) => g.key)
@@ -68,6 +70,8 @@ const draftLlmApiKey = ref(settingsStore.llmApiKey)
 const draftLlmModel = ref(settingsStore.llmModel)
 const draftLlmTimeout = ref(settingsStore.llmTimeout)
 const testingLlm = ref(false)
+// 导入备份保留数量草稿
+const draftBackupRetention = ref(settingsStore.backupRetentionCount)
 
 // 项目列表日期口径草稿（保存时一并落盘）
 const draftProjectListDateMode = ref<ProjectListDateMode>(settingsStore.projectListDateMode)
@@ -101,6 +105,10 @@ onMounted(async () => {
   // 否则与 App.vue 的 whenReady 并发执行时桥接尚未注入会抛 ApiError。
   await whenReady()
   await settingsStore.loadStorageInfo()
+  // 备份清单容错加载：失败不阻断设置页其余初始化
+  void settingsStore.loadImportBackups().catch(() => {
+    /* 忽略：备份 manifest 读取失败不阻断设置页 */
+  })
   await nextTick()
   if (scrollRef.value) scrollRef.value.scrollTop = 0
 })
@@ -247,9 +255,81 @@ async function onSave() {
       model: draftLlmModel.value.trim(),
       timeout: draftLlmTimeout.value,
     })
+    await settingsStore.saveBackupRetentionCount(draftBackupRetention.value)
     emit('save')
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '保存设置失败')
+  }
+}
+
+// ── 数据备份与回滚 ──
+
+/** 格式化文件大小（字节 -> KB/MB）。 */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
+/** 格式化 ISO 时间为本地可读格式（2026-08-04 10:15:30）。 */
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+/** trigger 中文标签。 */
+function triggerLabel(trigger: string): string {
+  if (trigger === 'smart_import') return '智能导入'
+  if (trigger === 'import') return '基础导入'
+  return trigger
+}
+
+/** 备份描述：来源 + 目标项目名（如有）。 */
+function backupDesc(entry: { source: string; project_name: string | null }): string {
+  const parts: string[] = []
+  if (entry.source) parts.push(`来源：${entry.source}`)
+  if (entry.project_name) parts.push(`导入到：${entry.project_name}`)
+  return parts.length > 0 ? parts.join(' · ') : '—'
+}
+
+async function onRestoreBackup(id: string, createdAt: string) {
+  try {
+    await ElMessageBox.confirm(
+      `回滚将用此备份点（${formatTime(createdAt)}）覆盖当前数据库，该备份点之后的所有改动（含多次导入与手动编辑）将永久丢失，且不可撤销。\n\n确定要回滚吗？`,
+      '回滚到导入前状态',
+      {
+        type: 'warning',
+        confirmButtonText: '确认回滚',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+    await settingsStore.restoreImportBackupById(id)
+    ElMessage.success('已回滚到所选备份点')
+    // 保留策略可能裁剪了部分旧备份，清单已在 store 内刷新；额外再刷新一次确保最新
+    await settingsStore.loadImportBackups()
+  } catch (e) {
+    if (e === 'cancel') return
+    ElMessage.error(e instanceof Error ? e.message : '回滚失败')
+  }
+}
+
+async function onDeleteBackup(id: string, createdAt: string) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除备份点（${formatTime(createdAt)}）吗？删除后无法再回滚到该时间点。`,
+      '删除备份',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+    await settingsStore.deleteImportBackupById(id)
+    ElMessage.success('备份已删除')
+  } catch (e) {
+    if (e === 'cancel') return
+    ElMessage.error(e instanceof Error ? e.message : '删除失败')
   }
 }
 </script>
@@ -470,6 +550,64 @@ async function onSave() {
               </el-form-item>
             </el-form>
           </template>
+
+          <!-- 数据备份与回滚 -->
+          <template v-else-if="g.key === 'backup'">
+            <h3 class="section-title">数据备份与回滚</h3>
+            <p class="section-desc">
+              每次导入（基础 / 智能）在写入前都会自动整库备份，可随时回滚到导入前状态。回滚是破坏性操作：会用所选备份点覆盖当前数据库，该备份点之后的所有改动（含多次导入与手动编辑）将永久丢失。schema 迁移备份永久保留，不在此清单中，也不参与自动清理。
+            </p>
+            <el-form label-position="top">
+              <el-form-item label="备份保留数量">
+                <el-input-number
+                  v-model="draftBackupRetention"
+                  :min="1"
+                  :max="100"
+                  :step="1"
+                  style="width: 160px"
+                />
+                <span class="field-hint">保留最近 N 个导入备份，超出自动清理；保存后生效</span>
+              </el-form-item>
+              <el-form-item>
+                <el-button plain @click="settingsStore.loadImportBackups()">刷新清单</el-button>
+                <span class="field-hint">导入后此清单不会自动刷新，可手动刷新</span>
+              </el-form-item>
+            </el-form>
+
+            <div v-if="importBackups.length === 0" class="backup-empty">
+              暂无导入备份（首次导入或保留策略已清空旧备份）
+            </div>
+            <div v-else class="backup-list">
+              <div v-for="b in importBackups" :key="b.id" class="backup-item">
+                <div class="backup-main">
+                  <div class="backup-row">
+                    <el-tag
+                      :type="b.trigger === 'smart_import' ? 'success' : 'info'"
+                      size="small"
+                    >
+                      {{ triggerLabel(b.trigger) }}
+                    </el-tag>
+                    <span class="backup-time">{{ formatTime(b.created_at) }}</span>
+                    <span class="backup-size">{{ formatSize(b.size) }}</span>
+                  </div>
+                  <div class="backup-desc">{{ backupDesc(b) }}</div>
+                </div>
+                <div class="backup-actions">
+                  <el-button size="small" @click="onRestoreBackup(b.id, b.created_at)">
+                    回滚
+                  </el-button>
+                  <el-button
+                    size="small"
+                    type="danger"
+                    plain
+                    @click="onDeleteBackup(b.id, b.created_at)"
+                  >
+                    删除
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </template>
         </section>
       </div>
     </div>
@@ -617,5 +755,60 @@ async function onSave() {
   justify-content: flex-end;
   gap: 8px;
   background: #fafafa;
+}
+/* 数据备份与回滚 */
+.backup-empty {
+  padding: 24px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+  background: #f9fafb;
+  border: 1px dashed #e5e7eb;
+  border-radius: 6px;
+}
+.backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  gap: 12px;
+}
+.backup-main {
+  flex: 1;
+  min-width: 0;
+}
+.backup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.backup-time {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  font-variant-numeric: tabular-nums;
+}
+.backup-size {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.backup-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.backup-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 </style>

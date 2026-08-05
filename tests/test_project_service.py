@@ -1292,7 +1292,6 @@ def test_todo_subitem_inherits_iter_deadline(service: ProjectService) -> None:
     assert reminders == []
 
 
-
 # ---------- get_full_snapshot（导出快照） ----------
 
 
@@ -1333,7 +1332,6 @@ def test_get_full_snapshot_roundtrip_shape(service: ProjectService) -> None:
         )
     )
     # 建 bug 关联到上面的迭代
-    bug = service  # placeholder
     from management_prd.services.bug_service import BugService
 
     bug_service = BugService(service._db)

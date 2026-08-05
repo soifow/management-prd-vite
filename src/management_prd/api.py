@@ -372,6 +372,10 @@ class WebApi:
         ``target`` 形如 ``{"project_id": "..."}``（已有项目）或 ``{"name": "..."}``
         （新建项目）。``reuse_id`` 由 parsed 中的来源标记决定：基础导入 True、智能导入
         False（智能导入数据无原始 ID，全新建）。
+
+        导入前在写入事务前做整库备份（设计 §9.1）：``trigger`` 由 reuse_id 反推
+        （基础=import / 智能=smart_import），``source`` 取快照项目名，``retention_count``
+        取已落盘设置；备份元信息透传给 :meth:`apply_full_import`。
         """
         try:
             from management_prd.models.data import ParsedProject
@@ -386,8 +390,16 @@ class WebApi:
             )
             # 智能导入数据无原始 ID（reuse_id=False）；基础导入有（reuse_id=True）。
             reuse_id = bool(parsed.get("reuse_id", True))
+            settings = self._settings_service.load()
+            backup_meta: dict[str, object] = {
+                "trigger": "import" if reuse_id else "smart_import",
+                "source": parsed_obj.name,
+                "project_id": target_obj.project_id,
+                "project_name": target_obj.name,
+                "retention_count": settings.backup_retention_count,
+            }
             project = self._project_service.apply_full_import(
-                target_obj, parsed_obj, reuse_id=reuse_id
+                target_obj, parsed_obj, reuse_id=reuse_id, backup_meta=backup_meta
             )
             return project.model_dump(mode="json")
         except (ManagementPrdError, ValueError) as exc:
@@ -442,6 +454,37 @@ class WebApi:
             logger.info("需求已导出(.md): %s", target)
             return str(target)
         except (ExportError, NotFoundError, StorageError, ValueError) as exc:
+            return _err(exc)
+
+    # ---------- 导入前备份与回滚 ----------
+
+    def list_import_backups(self) -> object:
+        """返回导入前备份清单（最新在前）。
+
+        每条含 manifest 元信息（id / file / created_at / trigger / source /
+        project_id / project_name / size），供设置页「数据备份与回滚」tab 渲染。
+        """
+        try:
+            return self._db.list_import_backups()
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def restore_backup(self, backup_id: str) -> object:
+        """回滚到指定导入前备份点（破坏性，覆盖当前库）。
+
+        覆盖后需前端全量刷新（项目列表 + 当前项目）。返回 True。
+        """
+        try:
+            self._db.restore_backup(backup_id)
+            return True
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
+    def delete_backup(self, backup_id: str) -> object:
+        """删除单个导入前备份（manifest 记录 + 文件）。"""
+        try:
+            return self._db.delete_backup(backup_id)
+        except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
     # ---------- 存储位置 ----------

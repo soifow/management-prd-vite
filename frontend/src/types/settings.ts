@@ -43,4 +43,6 @@ export interface AppSettings {
   llm_model: string
   /** LLM 请求超时（秒） */
   llm_timeout: number
+  /** 导入备份自动清理保留数量（保留最近 N 个；schema 迁移备份永久保留不参与清理） */
+  backup_retention_count: number
 }

@@ -525,6 +525,68 @@ ProjectService.apply_full_import(
     读为乱码交 LLM 尽力识别，属已知限制）；③ 智能导入只支持新建项目（不支持导入到
     已有项目），因 LLM 中间格式无 project_id 且 §7.4 流程以「识结构化为新项目」为主场景。
 
+- [x] **Step 6：导入前备份与回滚机制（完成）**
+  - `services/db_service.py` 重构 + 新增（设计 §9.1-§9.5）：
+    - 抽出 `_sqlite_backup(dest_path)` 底层（`sqlite3.Connection.backup()`，WAL 安全），
+      供迁移备份（`_backup_database`）与导入备份（`backup_for_import`）共用；失败清理
+      半成品文件并抛出。
+    - 新增「导入前备份与回滚」方法组（独立命名空间 `requment.db.preimport.{时间}.{id}.bak`
+      + `storage_dir/backups/manifest.json`）：`_read_manifest`/`_write_manifest`/
+      `_append_manifest`（原子写、损坏回退空）、`_prune_import_backups`（保留最近 N 个，
+      迁移备份不参与）、`backup_for_import(trigger, source, project_id, project_name,
+      retention_count)`（含用户数据才备份，projects 计数=0 守卫；返回 manifest 条目或
+      None）、`list_import_backups`（最新在前、文件缺失剔除）、`_prune_after`
+      （删该备份点之后的同类备份）、`restore_backup(id)`（设计 §9.4：持 `_lock` →
+      `wal_checkpoint(TRUNCATE)` → `shutil.copy` 覆盖 → 删 wal/shm → 删后续失效备份；
+      附带备份合法性校验，损坏文件拒绝覆盖主库）、`delete_backup(id)`。
+    - 文件名追加 12 位 entry id 保证同秒多次备份唯一；manifest 的 `created_at` 为
+      微秒精度 ISO，排序/裁剪以其为准。
+  - `services/project_service.py`：`apply_full_import` 新增 `backup_meta` 形参
+    （dict），提供则在写入事务前调 `DbService.backup_for_import`（基础/智能两条路径
+    统一在此触发，覆盖设计 §9.1「基础+智能都触发」）；None 跳过备份（测试调用与无
+    用户数据场景）。从 meta dict 显式提取字段（类型安全，不用 `**dict` 解包）。
+  - `models/settings.py`：`AppSettings` 新增 `backup_retention_count: int`
+    （默认 10，`ge=1 le=100`）；`settings_order` 默认工厂追加 `'backup'`。
+  - `api.py`：`apply_full_import` 内组装 backup_meta（`trigger` 由 reuse_id 反推
+    import/smart_import，`source`=快照项目名，`retention_count`=已落盘设置）透传；
+    新增 `list_import_backups` / `restore_backup` / `delete_backup` 三端点（错误转信封）。
+  - 前端 `types/api.ts`：新增 `ImportBackupEntry` 接口（manifest 元信息）。
+    `types/settings.ts`：新增 `backup_retention_count`。`types/pywebview.d.ts`：
+    新增 `list_import_backups` / `restore_backup` / `delete_backup` 签名。
+    `api/index.ts`：新增 `listImportBackups` / `restoreImportBackup` /
+    `deleteImportBackup` 封装。
+  - 前端 `stores/settings.ts`：新增 `backupRetentionCount` / `importBackups` ref +
+    `loadSettings` 回填 + `saveBackupRetentionCount` / `loadImportBackups` /
+    `restoreImportBackupById`（回滚后全量刷新：loadSummaries + 当前项目 loadProject
+    或 reset + 备份清单刷新）/ `deleteImportBackupById`；`settingsOrder` fallback
+    追加 `'backup'`。
+  - 前端 `components/SettingsPage.vue`：GROUPS 追加 `{key:'backup', label:'数据备份与回滚'}`；
+    新增「数据备份与回滚」tab（保留数量 el-input-number + 刷新清单按钮 + 备份列表：
+    trigger 标签/时间/大小/来源描述 + 回滚/删除按钮，回滚二次确认文案明确「将永久丢失
+    该备份点之后的所有改动，不可撤销」）；`onSave` 追加 `saveBackupRetentionCount`；
+    辅助函数 `formatSize`/`formatTime`/`triggerLabel`/`backupDesc` + `onRestoreBackup`/
+    `onDeleteBackup`；onMounted 容错加载备份清单。
+  - 测试：`tests/test_import_backup.py` 新增 23 例（backup_for_import 5：空库跳过/
+    文件+manifest/命名空间独立/retention 裁剪/None 默认 10；list 2；restore 5：覆盖+
+    删后续/删 wal-shm/缺失 id/缺失文件/损坏文件；delete 2；apply_full_import 联动 4：
+    基础 trigger/智能 trigger/空库跳过/无 meta 跳过；WebApi 集成 4；迁移备份独立性 1）。
+    `tests/test_settings_service.py` 同步断言 `settings_order` 含 `'backup'` +
+    `backup_retention_count==10`。
+  - 校验：`pytest tests/test_import_backup.py` 23 全过；Step 6 相关 5 个测试文件
+    合计 113 全过；`mypy src/` Success；`ruff check/format`（Step 6 文件）clean；
+    前端 `vue-tsc --noEmit` 通过；`eslint` 仅剩 `types/icons.d.ts` 3 条 Step 3 前既有
+    错误（与本次无关）。
+  - 修复中断遗留：`SettingsPage.vue` 的 `onSave` 函数 `try` 块未闭合、备份辅助函数
+    错嵌其内（编译期结构错误），补全 `} catch (e) {...}` 闭合并移出辅助函数。
+    顺带清掉 `tests/test_project_service.py` Step 1 遗留的 `bug = service` 占位赋值
+    （ruff F841）。
+  - 偏离/澄清：① 备份目录用 `storage_dir/backups/`（设计 §9.2），随存储目录迁移
+    一起被 `ProjectService.migrate_storage_dir` 搬走，无需额外指针；② 完整测试套件
+    偶发 `test_smart_import.py` 中文路径 `settings.json` 写入失败是 Step 5 测试
+    `_make_api` 落盘到真实用户目录（`service._bootstrap` 默认指向 platformdirs 中文
+    路径）的环境固有偶发问题，非 Step 6 引入（Step 6 的 `test_import_backup.py`
+    `_make_api` 不调 `update_settings`、只 `load()` 不写盘，独立跑全过）。
+
 ## 18. 文件变更清单
 
 ### Python 后端

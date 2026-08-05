@@ -997,6 +997,7 @@ class ProjectService:
         parsed: ParsedProject,
         *,
         reuse_id: bool = True,
+        backup_meta: dict[str, object] | None = None,
     ) -> Project:
         """应用完整导入（.md 快照）到目标项目。
 
@@ -1004,21 +1005,40 @@ class ProjectService:
             target: 新建项目（``name``）或已有项目（``project_id``）。
             parsed: 解析出的 :class:`ParsedProject`（frontmatter 权威）。
             reuse_id: True=基础导入（ID 复用/冲突映射）；False=智能导入（全新建）。
+            backup_meta: 导入前备份元信息（设计 §9.1）。提供则在事务前调用
+                :meth:`DbService.backup_for_import` 做整库快照；None 则跳过备份。
+                键：``trigger`` / ``source`` / ``project_id`` / ``project_name`` /
+                ``retention_count``。
 
         流程（单事务，失败回滚）：
-        1. 确定目标 project_id（新建或复用）。
-        2. 模块按名合并（先于 requirements）：目标项目已有同名模块 -> 复用其 DB id；
+        1. 导入前备份（提供 backup_meta 时）。
+        2. 确定目标 project_id（新建或复用）。
+        3. 模块按名合并（先于 requirements）：目标项目已有同名模块 -> 复用其 DB id；
            否则用导入 id 建（冲突则映射）。
-        3. ID 冲突映射：扫描目标库已占用 ID 与导入数据集 ID 求交，冲突生成新 id，
+        4. ID 冲突映射：扫描目标库已占用 ID 与导入数据集 ID 求交，冲突生成新 id，
            建 ``id_map{旧->新}``，并重写所有引用字段。
-        4. requirements/subitems/bugs 写入（upsert 语义：迭代按 (feature,date)、
+        5. requirements/subitems/bugs 写入（upsert 语义：迭代按 (feature,date)、
            bug 按 (date,content)、模块按 name 识别）。
-        5. 不变量：deferred 项 deadline 强制 NULL。
+        6. 不变量：deferred 项 deadline 强制 NULL。
 
-        导入前备份由 API 层在调用本方法前触发（见 Step 6）。
+        基础导入与智能导入共用本路径，故备份在此统一触发（覆盖两种场景）。
         """
         if target.project_id is None and not (target.name or "").strip():
             raise ValueError("导入目标必须指定项目名或已有项目 id")
+
+        # 导入前备份（独立命名空间 + manifest；无用户数据或未提供 meta 则跳过）。
+        # 从 meta dict 显式提取字段（类型安全），避免 **dict 解包无法静态校验。
+        if backup_meta is not None:
+            rc_raw = backup_meta.get("retention_count")
+            pid_raw = backup_meta.get("project_id")
+            pname_raw = backup_meta.get("project_name")
+            self._db.backup_for_import(
+                trigger=str(backup_meta.get("trigger", "import")),
+                source=str(backup_meta.get("source", "")),
+                project_id=pid_raw if isinstance(pid_raw, str) else None,
+                project_name=pname_raw if isinstance(pname_raw, str) else None,
+                retention_count=int(rc_raw) if isinstance(rc_raw, (int, str)) else None,
+            )
 
         now = _now()
         with self._db.transaction() as conn:

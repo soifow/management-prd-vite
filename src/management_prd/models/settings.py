@@ -40,7 +40,7 @@ class AppSettings(BaseModel):
     )
 
     settings_order: list[str] = Field(
-        default_factory=lambda: ["storage", "display", "reminder", "subitem", "llm"],
+        default_factory=lambda: ["storage", "display", "reminder", "subitem", "llm", "backup"],
         description="设置分组 tab 的显示顺序（分组 key 数组）",
     )
 
@@ -103,6 +103,13 @@ class AppSettings(BaseModel):
         ge=10,
         le=600,
         description="LLM 请求超时（秒）",
+    )
+
+    backup_retention_count: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="导入备份自动清理保留数量（保留最近 N 个；schema 迁移备份永久保留不参与清理）",
     )
 
     @model_validator(mode="after")

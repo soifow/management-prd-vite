@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import shutil
 import sqlite3
 import threading
 from collections import defaultdict
@@ -27,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from management_prd.errors import StorageError
+from management_prd.errors import BackupError, StorageError
 from management_prd.models.data import AppData
 from management_prd.services.bootstrap_service import BootstrapService
 
@@ -292,28 +294,38 @@ class DbService:
 
         logger.info("SQLite schema 自检完成: v%d -> v%d", version, CURRENT_DB_SCHEMA_VERSION)
 
+    def _sqlite_backup(self, dest_path: Path) -> Path:
+        """用 ``sqlite3`` 的 backup API 把当前库整库快照到 ``dest_path``。
+
+        复用给迁移备份与导入前备份。WAL 模式下未 checkpoint 的页也会被正确写入，
+        避免快照缺数据。失败清理半成品文件并抛出——没有快照就不改结构。调用方负责
+        在适当锁保护内调用（迁移备份在迁移期、导入备份持 ``_lock``）。
+        """
+        dest_path.unlink(missing_ok=True)  # 同秒重名（极罕见）先清空，保证目标干净
+        src = sqlite3.connect(str(self._path))
+        try:
+            dst = sqlite3.connect(str(dest_path))
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        except Exception:
+            src.close()
+            dest_path.unlink(missing_ok=True)
+            raise
+        src.close()
+        return dest_path
+
     def _backup_database(self, from_version: int) -> Path:
         """迁移前整库快照（含 WAL 未 checkpoint 数据），文件名含源版本号与时间戳。
 
-        用 ``sqlite3`` 的 backup API 而非 ``shutil.copy``：WAL 模式下未 checkpoint 的
-        页也会被正确写入备份文件，避免快照缺数据。备份失败直接抛出并清理半成品文件、
-        阻断迁移——没有快照就不改结构（参见 v4 迁移 CASCADE 清空关联表的踩坑）。全新库
+        复用 :meth:`_sqlite_backup` 底层。备份失败直接抛出并清理半成品文件、阻断
+        迁移——没有快照就不改结构（参见 v4 迁移 CASCADE 清空关联表的踩坑）。全新库
         无用户数据时不进入此方法（见 :meth:`_self_check_schema` 的 projects 计数守卫）。
         """
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         backup_path = self._path.parent / f"{self._path.name}.v{from_version}.{timestamp}.bak"
-        backup_path.unlink(missing_ok=True)  # 同秒重名（极罕见）先清空，保证目标干净
-        src = sqlite3.connect(str(self._path))
-        dst = sqlite3.connect(str(backup_path))
-        try:
-            src.backup(dst)
-        except Exception:
-            dst.close()
-            src.close()
-            backup_path.unlink(missing_ok=True)
-            raise
-        dst.close()
-        src.close()
+        self._sqlite_backup(backup_path)
         logger.info("数据库迁移前已备份: %s", backup_path)
         return backup_path
 
@@ -613,6 +625,212 @@ class DbService:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bug_project ON bugs(project_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bug_date ON bugs(project_id, date)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bug_linked ON bugs(linked_iteration_id)")
+
+    # ---------- 导入前备份与回滚 ----------
+
+    @property
+    def _backup_dir(self) -> Path:
+        """导入备份目录（含 manifest.json）。与数据库同目录的 ``backups/`` 子目录，
+        随存储目录迁移一起被搬走。"""
+        return self.storage_dir / "backups"
+
+    @property
+    def _manifest_path(self) -> Path:
+        return self._backup_dir / "manifest.json"
+
+    def _read_manifest(self) -> list[dict[str, object]]:
+        """读取备份 manifest（损坏则回退空列表，不阻断启动）。"""
+        if not self._manifest_path.exists():
+            return []
+        try:
+            raw = json.loads(self._manifest_path.read_text(encoding="utf-8"))
+            return raw if isinstance(raw, list) else []
+        except Exception as exc:
+            logger.warning("备份 manifest 损坏，按空处理: %s (%s)", self._manifest_path, exc)
+            return []
+
+    def _write_manifest(self, entries: list[dict[str, object]]) -> None:
+        """原子写 manifest。"""
+        self._backup_dir.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(entries, ensure_ascii=False, indent=2)
+        tmp = self._manifest_path.with_suffix(".json.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, self._manifest_path)
+
+    def _append_manifest(self, entry: dict[str, object]) -> None:
+        """追加一条 manifest 记录。"""
+        entries = self._read_manifest()
+        entries.append(entry)
+        self._write_manifest(entries)
+
+    def _prune_import_backups(self, retention_count: int | None) -> None:
+        """保留最近 ``retention_count`` 个导入备份，超出裁剪（迁移备份不参与）。
+
+        ``retention_count`` 为 None 时取默认 10；< 1 跳过裁剪（保留全部）。
+        """
+        if retention_count is None:
+            retention_count = 10
+        if retention_count < 1:
+            return
+        entries = self._read_manifest()
+        prefix = f"{self._path.name}.preimport."
+        import_entries = [e for e in entries if str(e.get("file", "")).startswith(prefix)]
+        import_entries.sort(key=lambda e: str(e.get("created_at", "")), reverse=True)
+        if len(import_entries) <= retention_count:
+            return
+        excess = import_entries[retention_count:]
+        excess_ids = {e["id"] for e in excess}
+        for e in excess:
+            (self._backup_dir / str(e["file"])).unlink(missing_ok=True)
+        self._write_manifest([e for e in entries if e["id"] not in excess_ids])
+        logger.info("已裁剪 %d 个旧导入备份（保留最近 %d 个）", len(excess), retention_count)
+
+    def backup_for_import(
+        self,
+        *,
+        trigger: str = "import",
+        source: str = "",
+        project_id: str | None = None,
+        project_name: str | None = None,
+        retention_count: int | None = None,
+    ) -> dict[str, object] | None:
+        """导入前整库备份（独立命名空间 + manifest 记录）。
+
+        触发点：基础导入与智能导入在写入前都调用（见
+        :meth:`management_prd.services.project_service.ProjectService.apply_full_import`）。
+        复用 :meth:`_sqlite_backup` 底层（WAL 安全），但文件名独立 ——
+        ``requment.db.preimport.{YYYYMMDD-HHMMSS}.{id}.bak``，与迁移备份
+        ``requment.db.v{版本}.{时间}.bak`` 区分。文件名追加 ``id`` 保证同秒多次
+        备份唯一（manifest 的 created_at 为微秒精度，排序/裁剪以其为准）。备份文件
+        与 manifest 同放 ``storage_dir/backups/``。
+
+        含用户数据才备份（``projects`` 计数 > 0 守卫，与迁移备份同）；全新库首次导入
+        不产生备份。按 ``retention_count`` 裁剪旧导入备份（迁移备份不参与清理）。
+
+        Returns:
+            manifest 条目 dict；无用户数据时返回 None。
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                has_data = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] > 0
+            finally:
+                conn.close()
+            if not has_data:
+                return None
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            entry_id = uuid4().hex[:12]
+            self._backup_dir.mkdir(parents=True, exist_ok=True)
+            # 文件名追加 entry_id：同秒多次导入（如批量测试）文件名唯一，避免互相覆盖；
+            # manifest 的 created_at 仍为微秒精度 ISO，排序/裁剪以 created_at 为准。
+            backup_path = (
+                self._backup_dir / f"{self._path.name}.preimport.{timestamp}.{entry_id}.bak"
+            )
+            self._sqlite_backup(backup_path)
+            entry: dict[str, object] = {
+                "id": entry_id,
+                "file": backup_path.name,
+                "created_at": datetime.now().isoformat(),
+                "trigger": trigger,
+                "source": source,
+                "project_id": project_id,
+                "project_name": project_name,
+                "size": backup_path.stat().st_size,
+            }
+            self._append_manifest(entry)
+            self._prune_import_backups(retention_count)
+        logger.info("导入前已备份: %s (trigger=%s)", backup_path, trigger)
+        return entry
+
+    def list_import_backups(self) -> list[dict[str, object]]:
+        """返回导入前备份清单（最新在前；文件缺失的条目剔除）。
+
+        只列 ``preimport`` 命名空间的导入备份——schema 迁移备份（``v{版本}.{时间}.bak``）
+        不在 manifest 中自然不出现。
+        """
+        prefix = f"{self._path.name}.preimport."
+        entries = self._read_manifest()
+        result: list[dict[str, object]] = []
+        for e in entries:
+            if not str(e.get("file", "")).startswith(prefix):
+                continue
+            if not (self._backup_dir / str(e["file"])).exists():
+                continue
+            result.append(e)
+        result.sort(key=lambda e: str(e.get("created_at", "")), reverse=True)
+        return result
+
+    def _prune_after(self, created_at: str) -> None:
+        """删除创建时间晚于 ``created_at`` 的导入备份（回滚后这些备份已失效）。
+
+        只处理 ``preimport`` 命名空间；manifest 中其他条目（如未来扩展）保留。
+        """
+        entries = self._read_manifest()
+        prefix = f"{self._path.name}.preimport."
+        keep: list[dict[str, object]] = []
+        for e in entries:
+            if (
+                str(e.get("file", "")).startswith(prefix)
+                and str(e.get("created_at", "")) > created_at
+            ):
+                (self._backup_dir / str(e["file"])).unlink(missing_ok=True)
+            else:
+                keep.append(e)
+        self._write_manifest(keep)
+
+    def restore_backup(self, backup_id: str) -> Path:
+        """回滚到指定导入前备份点（破坏性，覆盖当前库）。
+
+        流程（设计 §9.4）：取 ``_lock`` → ``wal_checkpoint(TRUNCATE)`` 落盘 →
+        ``shutil.copy(backup, db_path)`` 覆盖 → 删除 ``db_path-wal``/``db_path-shm``
+        → 删除该备份点之后的同类备份（失效）。返回主库路径供调用方重载。
+        """
+        entries = self._read_manifest()
+        entry = next((e for e in entries if e.get("id") == backup_id), None)
+        if entry is None:
+            raise BackupError(f"备份不存在: {backup_id}")
+        backup_path = self._backup_dir / str(entry["file"])
+        if not backup_path.exists():
+            raise BackupError(f"备份文件缺失: {entry['file']}")
+
+        # 校验备份是合法 SQLite（防止损坏文件覆盖主库）
+        try:
+            bconn = sqlite3.connect(str(backup_path))
+            try:
+                bconn.execute("SELECT COUNT(*) FROM projects")
+            finally:
+                bconn.close()
+        except Exception as exc:
+            raise BackupError(f"备份文件损坏: {entry['file']}") from exc
+
+        with self._lock:
+            # 1. checkpoint 落盘，确保 WAL 页全部合并进主库文件后再覆盖
+            conn = self._connect()
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                conn.close()
+            # 2. 覆盖主库
+            shutil.copy(backup_path, self._path)
+            # 3. 删除 wal/shm（避免残留旧 WAL 干扰新库）
+            for suffix in ("-wal", "-shm"):
+                Path(str(self._path) + suffix).unlink(missing_ok=True)
+            # 4. 删除该备份点之后的备份（失效）
+            self._prune_after(str(entry["created_at"]))
+        logger.info("已回滚到导入前备份: %s", backup_path)
+        return self._path
+
+    def delete_backup(self, backup_id: str) -> bool:
+        """删除单个导入备份（manifest 记录 + 文件）。不存在抛 :class:`BackupError`。"""
+        with self._lock:
+            entries = self._read_manifest()
+            entry = next((e for e in entries if e.get("id") == backup_id), None)
+            if entry is None:
+                raise BackupError(f"备份不存在: {backup_id}")
+            (self._backup_dir / str(entry["file"])).unlink(missing_ok=True)
+            entries.remove(entry)
+            self._write_manifest(entries)
+        return True
 
     # ---------- 旧版 JSON 一次性迁移 ----------
 

@@ -2,7 +2,7 @@
  * PyWebView 桥接全局类型声明。
  */
 
-import type { ApiErrorEnvelope } from './api'
+import type { ApiErrorEnvelope, ImportBackupEntry } from './api'
 import type { BugItem, BugLinkInfo, BugStatus, CreateBugInput, UpdateBugInput } from './bug'
 import type { ImportTarget, ParseMdResult, ParsedProject } from './import'
 import type { Module } from './module'
@@ -122,6 +122,11 @@ export interface PyWebViewApi {
   >
   /** 智能导入：弹文件框 -> 读文本 -> LLM 结构化 -> ParsedProject（预览用）。取消返回 None。 */
   smart_import(): Promise<ParseMdResult | null | ApiErrorEnvelope>
+
+  // ── 导入前备份与回滚 ──
+  list_import_backups(): Promise<ImportBackupEntry[] | ApiErrorEnvelope>
+  restore_backup(backup_id: string): Promise<boolean | ApiErrorEnvelope>
+  delete_backup(backup_id: string): Promise<boolean | ApiErrorEnvelope>
 
   // ── 系统 ──
   open_external_url(url: string): Promise<boolean | ApiErrorEnvelope>
