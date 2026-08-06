@@ -92,6 +92,104 @@ def test_xlsx_corrupt_raises(tmp_path: Path) -> None:
     assert "无法读取 Excel" in str(exc.value)
 
 
+def test_xlsx_merged_cells_filled(tmp_path: Path) -> None:
+    """合并单元格：被合并区单元格在 Markdown 中填充左上角值，不再留空（决策见模块 docstring）。"""
+    from openpyxl import Workbook
+
+    path = tmp_path / "merged.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["模块", "功能", "状态"])
+    ws.append(["登录与支付", "微信登录", "已完成"])
+    ws.append(["登录与支付", "找回密码", "待办"])
+    ws.append(["登录与支付", "微信支付", "待办"])
+    ws.merge_cells("A2:A4")
+    wb.save(path)
+
+    text, _ = extract_text_for_llm(path)
+
+    # 合并区每行都出现「登录与支付」，不再有空列
+    assert "| 登录与支付 | 微信登录 | 已完成 |" in text
+    assert "| 登录与支付 | 找回密码 | 待办 |" in text
+    assert "| 登录与支付 | 微信支付 | 待办 |" in text
+    # 横向合并（B2:C2 跨列）也填充
+    ws2 = Workbook()
+    w2 = ws2.active
+    w2.append(["模块", "说明"])
+    w2.append(["登录", "包括注册与找回密码的内容很长"])
+    w2.merge_cells("B2:C2")
+    w2["B2"] = "登录模块全部功能"
+    path2 = tmp_path / "merged_h.xlsx"
+    ws2.save(path2)
+    text2, _ = extract_text_for_llm(path2)
+    assert "| 登录 | 登录模块全部功能 |" in text2
+
+
+def test_xlsx_dates_named(tmp_path: Path) -> None:
+    """日期归一：datetime 对象、日期序列号+中文格式、中文/斜杠/横线/点日期串统一转 ISO。"""
+    from datetime import datetime
+
+    from openpyxl import Workbook
+
+    path = tmp_path / "dates.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["名称", "日期"])
+    ws.append(["datetime对象", datetime(2024, 11, 12)])
+    ws.append(["序列号+中文格式", 45608.0])
+    ws.append(["序列号+日期格式", 45608.0])
+    ws.append(["中文文本", "2024年11月12日"])
+    ws.append(["斜杠文本", "2024/11/13"])
+    ws.append(["横线文本", "2024-12-01"])
+    ws.append(["点文本", "2024.12.05"])
+    # 序列号+日期格式：给 B 列对应行设日期格式触发序列号转日期分支
+    ws["B3"].number_format = 'yyyy"年"m"月"d"日"'
+    ws["B4"].number_format = "yyyy-mm-dd"
+    wb.save(path)
+
+    text, _ = extract_text_for_llm(path)
+
+    assert "| datetime对象 | 2024-11-12 |" in text
+    assert "| 序列号+中文格式 | 2024-11-12 |" in text
+    assert "| 序列号+日期格式 | 2024-11-12 |" in text
+    assert "| 中文文本 | 2024-11-12 |" in text
+    assert "| 斜杠文本 | 2024-11-13 |" in text
+    assert "| 横线文本 | 2024-12-01 |" in text
+    assert "| 点文本 | 2024-12-05 |" in text
+
+
+def test_xlsx_plain_number_not_converted(tmp_path: Path) -> None:
+    """非日期格式的普通数值不应被误转成日期（45608 若格式为 General 保持原样）。"""
+    from openpyxl import Workbook
+
+    path = tmp_path / "num.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["名称", "数量"])
+    ws.append(["订单数", 45608])  # General 格式，非日期
+    wb.save(path)
+
+    text, _ = extract_text_for_llm(path)
+
+    assert "| 订单数 | 45608 |" in text
+
+
+def test_xlsx_description_with_date_not_converted(tmp_path: Path) -> None:
+    """描述性文本里的日期不应被整段替换：仅整串为日期才归一。"""
+    from openpyxl import Workbook
+
+    path = tmp_path / "desc.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["模块", "说明"])
+    ws.append(["登录", "预计2024年11月12日上线，含微信支付"])  # 日期嵌在描述中
+    wb.save(path)
+
+    text, _ = extract_text_for_llm(path)
+
+    assert "| 登录 | 预计2024年11月12日上线，含微信支付 |" in text
+
+
 def test_xlsx_amplifies_text(tmp_path: Path) -> None:
     """Markdown 分隔符放大文本：抽取后长度 > 所有单元格值字符总和（长度校验须在抽取后）。"""
     from openpyxl import Workbook
