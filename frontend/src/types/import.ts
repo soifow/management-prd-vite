@@ -95,6 +95,8 @@ export interface SmartPickResult {
   filename: string
   text: string
   char_count: number
+  /** 文件格式标识（xlsx/docx/txt/md/csv 等），供前端提示「已识别为某格式」 */
+  source_format: string
 }
 
 /** run_smart_import 返回结果：LLM 结构化出的项目快照 + 文件名。 */

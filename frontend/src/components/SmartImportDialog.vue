@@ -87,6 +87,10 @@ async function onPickFile() {
     if (!result) return // 用户取消选文件，留在 ①
     pickedFilename.value = result.filename
     pickedText.value = result.text
+    // 已识别格式提示（决策 10）：xlsx/docx 为解析后文本，其余为原样读取
+    if (result.source_format) {
+      ElMessage.info(`已识别为 ${result.source_format.toUpperCase()} 文档`)
+    }
     startAnalyzing()
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '选择文件失败')
@@ -214,7 +218,7 @@ watch(visible, (v) => {
     <div v-if="step === 'pickFile'" class="step-content">
       <div class="pick-file-hint">
         <p>选择一个需求记录文件，AI将尝试自动识别结构并创建新项目</p>
-        <p class="pick-hint-sub">支持 .txt / .md / .docx 等文本文件（.docx 可能产生乱码，AI 尽力识别）</p>
+        <p class="pick-hint-sub">支持 .txt / .md / .csv / .xlsx / .docx（Excel/Word 将自动解析为文本）</p>
       </div>
       <el-button type="primary" @click="onPickFile">
         选择文件

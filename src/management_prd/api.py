@@ -503,8 +503,9 @@ class WebApi:
             if not picked:
                 return None
             path = Path(picked)
-            # 二进制文件（.docx 等）按文本读取可能产生乱码，交由 LLM 尽力识别；明确超长则拒绝
-            text = path.read_text(encoding="utf-8", errors="replace")
+            # 二进制文档（.xlsx/.docx）解析为结构化 Markdown；其余回退纯文本读取
+            from management_prd.services.file_text_extractor import extract_text_for_llm
+            text, source_format = extract_text_for_llm(path)
             if len(text) > self._LLM_MAX_INPUT_CHARS:
                 raise LlmError(
                     f"文件过长（{len(text)} 字符，上限 {self._LLM_MAX_INPUT_CHARS}），请拆分后重试"
@@ -513,6 +514,7 @@ class WebApi:
                 "filename": path.stem,
                 "text": text,
                 "char_count": len(text),
+                "source_format": source_format,
             }
         except (LlmError, ManagementPrdError, ValueError, TypeError) as exc:
             return _err(exc)

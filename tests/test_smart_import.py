@@ -471,3 +471,76 @@ def test_build_messages_feeds_into_client_payload() -> None:
     assert msgs[1]["role"] == "user"
     assert "会员.md" in msgs[1]["content"]
     assert "任意文档内容" in msgs[1]["content"]
+
+
+# ── pick：多格式文件解析（设计 docs/design/smart-import-file-extraction.md）──
+
+
+def test_pick_smart_import_file_xlsx(
+    service: ProjectService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """选 .xlsx -> 返回 source_format=xlsx，text 为解析后的 Markdown 表格。"""
+    from openpyxl import Workbook
+
+    api, _ = _make_api(service)
+    path = tmp_path / "req.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "主界面"
+    ws.append(["模块", "功能"])
+    ws.append(["登录", "微信登录"])
+    wb.save(path)
+    monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: str(path))
+
+    result = api.pick_smart_import_file()
+    assert isinstance(result, dict)
+    assert result["filename"] == "req"
+    assert result["source_format"] == "xlsx"
+    assert "| 模块 | 功能 |" in str(result["text"])
+    assert "| 登录 | 微信登录 |" in str(result["text"])
+
+
+def test_pick_smart_import_file_corrupt_xlsx(
+    service: ProjectService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """损坏 .xlsx -> 错误信封含「无法读取 Excel」（step1 早失败）。"""
+    api, _ = _make_api(service)
+    path = tmp_path / "bad.xlsx"
+    path.write_bytes(b"not a real xlsx")
+    monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: str(path))
+
+    result = api.pick_smart_import_file()
+    assert isinstance(result, dict)
+    assert result.get("success") is False
+    assert "无法读取 Excel" in result.get("error", "")
+
+
+def test_pick_smart_import_file_length_check_after_extraction(
+    service: ProjectService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """抽取后超长 -> 错误信封（确认长度校验在抽取之后，二进制→Markdown 放大后判）。"""
+    from openpyxl import Workbook
+
+    api, _ = _make_api(service)
+    monkeypatch.setattr(api, "_LLM_MAX_INPUT_CHARS", 50)
+
+    path = tmp_path / "big.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["模块", "功能"])
+    for i in range(100):
+        ws.append([f"模块{i}", f"功能{i}"])
+    wb.save(path)
+    monkeypatch.setattr(api, "_open_text_file", lambda *a, **kw: str(path))
+
+    result = api.pick_smart_import_file()
+    assert isinstance(result, dict)
+    assert result.get("success") is False
+    assert "文件过长" in result.get("error", "")
+
