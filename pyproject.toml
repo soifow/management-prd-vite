@@ -1,6 +1,6 @@
 [project]
 name = "management-prd-vite"
-version = "2.0.1"
+version = "2.3.0"
 description = "多项目需求记录桌面应用（Vue 3 + Vite + PyWebView + PyInstaller）"
 readme = "README.md"
 requires-python = ">=3.11"
