@@ -1,0 +1,99 @@
+# 项目技术决策与实现记录
+
+> 本文件记录各功能模块的设计决策与实现细节。CLAUDE.md 仅保留**开发规则与约束**，
+> 需要了解某功能的设计背景时按条件引用本文件对应章节。
+
+---
+
+## 多项目需求记录工具技术决策（2026-07-27）
+
+设计方案：`docs/design/multi-project-requirement-tracker.md`（**v3**）。关键技术决策：
+
+- **数据模型（v3 重构）**：`RequirementItem` 为**单 `date`** + `feature` 字段（不再多 occurrence）。同一个 `(module, feature)` 下的多条 RequirementItem 构成该功能的迭代链，按 `date` 升序排列。`feature` 导入时 = `content`，用户可手动改以关联内容相近的多次记录。
+- **UI（v3）**：树形只到 **项目 → 模块 → 功能** 三级（功能为叶子）；点击功能进**功能详情页**（核心交互），左 `md-editor-v3` 编辑/预览当前迭代内容，右 `el-timeline` 展示该功能所有迭代，**点击时间轴节点跳转**到对应迭代并高亮。详情页支持「新建迭代」「删除迭代」「删除功能」。
+- **依赖**：无 LLM（不引入 `anthropic`/`jinja2`/`openai`/`gitpython`/`vue-router`）；**新增 `md-editor-v3`**（功能内容 markdown 编辑/渲染）；Python 仅 `pywebview`+`pydantic`+`pydantic-settings`+`platformdirs`；无 `llm/`、`templates/` 模块。
+- **项目列表日期（需求1）**：`ProjectSummary.latest_done_or_ui_date` = status∈{done, ui_done_waiting_backend} 的需求 `date` 取最大；侧边栏展示该日期。
+- **存储**：单文件 `data.json`（platformdirs 用户数据目录），临时文件 + `os.replace` 原子写；schema_version=1。
+- **桥接**：复用参考项目 `WebApi`+`set_window`+`{success:false,error}` 信封；前端 `whenReady`/`invoke<T>` 解包。
+- **API（v3）**：移除 `add_occurrence`/`remove_occurrence`；新增 `list_features(project_id, module)`、`list_iterations(project_id, module, feature)`（按 date 升序）。`create_requirement` 入参改为单 date + feature。
+- **导入（v3）**：分隔行 `^[=#\-]{4,}$`（≥4，避开裸 `###`）；仅 `YYMMDD` 段有效；`1/2/3`=点、`A/B`/Markdown=模块；`to do`/`待办`/`暂缓` 模块标题作状态段（其下点置 TODO/DEFERRED，其余默认 DONE）；尾标 `【…】` 可剥离。**不再按 `(module,content)` 合并多日期**——每 `(date,module,content)` 各产出一条 ParsedRequirement（`feature=content`）。
+- **导入语义**：**不改已有需求状态**——按 `(date,module,content)` 去重；已存在则跳过，status 原样保留。
+- **导出（v3）**：每条 RequirementItem 一段（单 date），按 `date→module→feature` 分组、`1./2./3.` 编号、尾标 `【{STATUS_LABEL}】`；往返幂等。
+- **删除二次确认**：项目/迭代均 `ElMessageBox.confirm`。
+- **YYMMDD 世纪 pivot**：`yy<=80 → 20yy else 19yy`。
+
+---
+
+## 完成时限 + 待办提醒抽屉（2026-07-29）
+
+设计方案：`docs/design/completion-deadline-todo-reminder.md`。关键技术决策：
+
+- **新字段 `completion_deadline`**：`RequirementItem` / `CreateRequirementInput` 加 `completion_deadline: date | None`，与已有「迭代日期」`date` 区分（`date` 记录需求提出日期，`completion_deadline` 记录要求完成时限，留空=无时限）。SQLite schema **v1→v2**：新增可空列用 `ALTER TABLE ADD COLUMN`（纯增量，无需备份/重建表），`_self_check_schema` 内 `PRAGMA table_info` 做幂等保护。
+- **可空字段更新三态**：`UpdateRequirementInput` 用 `completion_deadline: date | None`（None=跳过）+ `clear_completion_deadline: bool`（True=置 NULL，优先级更高）区分「跳过/设值/清空」，**不依赖** pydantic `model_fields_set`。前端 `updateRequirement` 镜像同样语义。
+- **`deferred` 自动清空时限（三路径强制）**：状态改为 `deferred` 时 `completion_deadline` 强制置 NULL（暂缓=远期规划，无固定时限）。三条写入路径——`create_requirement`（新建时 status=deferred）、`update_requirement`（deferred 优先级高于 clear/set）、`set_status`（DateGroupView 快捷切换，UPDATE 追加 `completion_deadline = NULL`）——均由后端单点强制；前端编辑弹窗/功能详情 `watch(status)` 做即时清空反馈。设值后改回非 deferred 状态**不**自动恢复时限（需手动重设）。
+- **待办查询 `list_todo_reminders`**：后端单点完成阈值过滤、剩余天数计算、排序，返回扁平有序 `dict` 列表（带 `bucket`/`remaining_days`）。纳入规则（仅排除 `done`）：`deferred` 始终纳入置末尾「远期规划」组不受阈值影响；非 deferred 无时限项受 `show_no_deadline_in_todo` 开关控制；非 deferred 有时限项仅 `remaining_days <= reminder_threshold_days` 纳入，`<0` 归「已逾期」组置顶、`≥0` 归「剩余 N 天」组。排序键 `(bucket_rank, remaining_days, project_name, content)`。
+- **设置**：`AppSettings` 加 `reminder_threshold_days: int`（默认 7，`ge=0`，负值被 pydantic 拒绝）+ `show_no_deadline_in_todo: bool`（默认 True）；`settings_order` 默认工厂加 `'reminder'`。设置存 `settings.json`（非 DB），阈值与开关经 `WebApi.get_todo_reminders` 读取后传入查询。
+- **启动抽屉 + 跨项目跳转**：`App.vue` `onMounted` 末尾 `todoStore.load()` 后 `todoVisible=true` 自动弹出。点击非当前项目条目时用 `suppressProjectLoad` 守卫规避竞态——`watch(activeProjectId)→loadProject` 会重置 `selectedFeature`，跳转 handler 先置守卫、再 `select→loadProject→openFeature→selectIteration`，`finally` 释放。`AppNavMenu` 顶部铃铛菜单项 emit `'open-todo'` 供手动重开。
+- **已知限制**：导入/导出文本格式不含 `completion_deadline`；导出后重新导入会丢失时限（时限仅由 UI 维护的元数据）。`ParsedRequirement` 不加该字段。**（本条为旧 .txt 格式限制，已于 2026-08-04 导入/导出重设计推翻：新 .md 双轨格式 frontmatter 含 `deadline`，无损往返，`ParsedRequirement` 亦已随旧 .txt 路径移除。详见下「导入/导出重设计」节。）**
+
+---
+
+## Bug 管理（2026-07-30）
+
+设计方案：`docs/design/bug-management.md`。关键技术决策：
+
+- **独立 `bugs` 表（schema v2→v3）**：bug 与需求分离存储，不混在 requirements 里。新表含 `module`（必填，来自该项目需求已有模块）/ `content`（markdown）/ `level`（P0-P4）/ `status`（open 待修复 / fixed 已修复）/ `linked_iteration_id`（可空，指向 requirements.id，**不加 FK**，应用层 staleness 检测）/ `date`。`FK project_id REFERENCES projects(id) ON DELETE CASCADE` 与 requirements 同范式。新增表是纯增量，无需备份/重建表。
+- **移除 `RequirementStatus.BUG`（防孤儿核心）**：从 Python `RequirementStatus` 枚举、`STATUS_LABEL`、`STATUS_SECTION_KEYWORDS`、importer `_STATUS_PRIORITY`、前端 `RequirementStatus` 类型与 `STATUS_LABEL`/`STATUS_TAG_TYPE`、FilterToolbar/RequirementEditDialog/FeatureDetail/ImportPreviewDialog 的 `statusOptions` 全部移除 `bug`。这样自动封堵所有「重新引入 bug 状态需求」的途径（前端状态选择、导入 `bug` 段标题、legacy `【bug】` 尾标经 `LABEL_TO_STATUS` 自动失效）——bug 只能经 Bug 管理创建。`RequirementStatus.BUG` 枚举值彻底删除而非保留墓碑值。
+- **一次性迁移（无守卫键）**：`_self_check_schema` v3 分支读 `requirements WHERE status='bug'`（用**原始字符串** `'bug'`，不依赖枚举值）→ `INSERT OR IGNORE INTO bugs`（复用原 id，level=P3 默认、status=open 默认、linked=NULL，丢弃 feature/completion_deadline）→ `DELETE FROM requirements WHERE status='bug'`。幂等性靠三层：① `init_db` 事务原子回滚（失败撤销全部）；② `CREATE/INDEX IF NOT EXISTS` + `INSERT OR IGNORE`（复用 id）+ `DELETE`（重跑 0 行）；③ 版本升 3 后分支不再执行。**不加 `_meta.migrated_bugs` 守卫键**——纯库内迁移无文件副作用（与 `migrated_json` 不同，后者要 `unlink` 删 `data.json` 故需守卫）。
+- **模块约束**：bug 的 `module` 必须来自该项目 requirements 已有模块（`list_modules` 口径），`BugService._assert_module_known` 后端单点校验；前端用 `el-select`（非 autocomplete）强制只能选已有，不允许新建。模块全空时无法创建 bug（提示「该项目暂无模块」）。
+- **关联迭代三态 + 跳转**：`UpdateBugInput.linked_iteration_id` + `clear_linked`（True=置 NULL，优先级更高）镜像 `completion_deadline` 三态范式。关联后 `resolve_bug_link` 按 id 查 requirements 返回 `{module, feature, item_id, ...}`（失效返回 None，前端灰显「关联已失效」+ 清除按钮，不自动改库）。BugDetail「跳转查看」emit → `App.vue.onJumpToRequirement` 复用 `suppressProjectLoad` 守卫 + 四步 `select→loadProject→openFeature→selectIteration` 切回工作区定位迭代。
+- **视图与组件**：`App.vue` `currentView: 'workspace'|'bug'|'settings'`（无 vue-router，响应式 `v-else-if` 切换）。Bug 视图全部新建组件（不复用需求侧，字段语义差异大：bug 无 feature、模块不可新建、状态=open/fixed）：`BugPage`(容器，复用工作区布局 class) / `BugSidebar`(无三个按钮，保留聚合切换，共享 `useProjectsStore.activeProjectId`，独立 `bugsStore.viewMode`) / `BugToolbar`(+bug，无导出，级别多选+关键字筛选) / `BugTree`(模块聚合) / `BugDateView`(时间聚合) / `BugDetail`(左编辑器+右关联卡片) / `BugEditDialog`。`useBugsStore` 独立 `watch(activeProjectId)` 调 `loadBugs`（与 App.vue 的 requirements watch 并行互不干扰）。Bug 不纳入待办提醒抽屉、不实现导入导出。
+- **已知限制**：迁移来的旧 bug 无原始级别信息，统一赋 P3；无关联迭代（linked_iteration_id=NULL，用户可手动关联）。bug 导入/导出不实现，仅 UI 创建。
+
+---
+
+## 多模块关联 + 迭代级子需求 + 需求/Bug 平级（2026-07-31）
+
+设计方案：`docs/design/multi-module-subitem-and-parity.md`。三个场景一揽子解决，关键技术决策：
+
+- **多模块 = 纯多对多关联表（schema v3→v4）**：新建 `requirement_modules(requirement_id, module_id)` 与 `bug_modules(bug_id, module_id)`，均 `PRIMARY KEY(双列)` + 双 FK + `ON DELETE CASCADE`。**移除** `requirements.module` / `bugs.module` 列（按 SQLite Migration Rule：备份 → `CREATE TABLE _new` → 回填除 module 外全部列 → `DROP` → `RENAME`）。任一模块平权，无主从。
+- **迭代链键解耦 + 同 (feature,date) 合并**：原 `(project_id, module, feature)` 改为 **`(project_id, feature)`**，`list_features(project_id)` / `list_iterations(project_id, feature)` 去 module 参数。requirements 表加 **`UNIQUE(project_id, feature, date)`**：同一功能同一日期只允许一条迭代。迁移时同 `(feature, date)` 跨模块多条需求合并为一条迭代；新建时 `create_requirement` 内做 upsert 并入（新 content 作为子需求追加）。
+- **模块升级为一等实体**：新建 `modules` 表（`UNIQUE(project_id,name)` / `FK projects ON DELETE CASCADE`），需求侧与 bug 侧共建共享、双向同步。`list_modules` 改查此表返回 `Module[]`。`BugService._assert_module_known` 改查 modules 表，bug 侧可独立建模块。`delete_module` 后端单点**拒绝非空**（已确认）。
+- **子需求 = 迭代级（挂 iteration_id）**：新建 `requirement_subitems` 表，`iteration_id` → requirements.id，`UNIQUE(iteration_id, seq)`，`FK iteration_id ON DELETE CASCADE`。字段：id / iteration_id / seq / content / status(复用 RequirementStatus) / completion_deadline（deferred 强制 NULL，镜像三态范式）/ created_at / updated_at。子需求随迭代存在，删迭代 CASCADE 删子需求，无孤儿。UI 详情页子需求清单区显示**当前选中迭代**的子需求，随 el-timeline 节点切换。**不参与导入导出**（仅 UI 维护 + 迁移期生成）。
+- **功能状态 = 独立维护 + 完成提示（迭代级，不自动推导）**：RequirementItem.status 仍用户手动维护。当**当前迭代**所有子需求 done 且该迭代非 done 时，前端弹 `ElMessageBox.confirm` 建议把该迭代改 done——用户确认才改，取消不动；`completionPromptGuard` ref 防重复弹窗，切换迭代时重置。
+- **迁移合并 + list 转子需求（v4 核心）**：按 `(project_id, feature, date)` 分组历史 RequirementItem。组内仅 1 条且 content 单段 → 保留原 content 无子需求；组内多条 或 任一 content 为 list 形态（行首 `^\d+[.、]\s*` 至少 2 行）→ 合并迭代 content 置**功能名**，status 取**最低完成度**（todo > ui_done > deferred > done），多模块关联取并集，所有原 content（list 逐项展开 + 单段整体）打平为该迭代子需求（status 继承来源）。例：主界面/UI/"1.第一行 2.第二行 3.第三行" + 需求详情/UI/"单行描述"（均 07-29）→ 合并迭代 content="UI"，子需求=[第一行,第二行,第三行,单行描述]。
+- **API 入参改 module_names: list[str]**：Create/Update Requirement/Bug 的 `module` 改 `module_names: list[str]`（≥1，None=跳过；提供则整体替换）。前端 `el-select multiple + allow-create + filterable`，输入新名由后端 `ensure_modules` 自动落表。新增 5 子需求方法（按 iteration_id）+ create_module/delete_module。
+- **待办/导出展示模块口径**：`list_todo_reminders` 与 `resolve_bug_link` 用子查询 `(SELECT m.name FROM requirement_modules rm JOIN modules m ... ORDER BY m.name LIMIT 1)` 取「展示模块」回填。exporter 取 `item.modules[0]`（按 name 升序）作为导出文本模块标题。
+- **导入去重键不退化**：旧版导入文本仍单 module，`apply_import` 派生 `module_names=[module]`，去重键保持 `(date, module, content)`（用 parsed.module 参与），与 v3 等价。**（本条涉及旧 `.txt` 导入路径——`apply_import` 已于 2026-08-04 导入/导出重设计被 `apply_full_import` 取代并随 Step 7 移除。新 .md 导入按 frontmatter 权威解析，不绕此去重路径。）**
+- **设置项 show_subitem_progress_in_tree（默认关）**：关 → 树形功能节点不显示子需求进度，仅详情页头部显示；开 → 树形节点追加 `(done/total)`，进度来自 `get_project` 回填的 `subitem_progress` 摘要。`settings_order` 加 `'subitem'`。
+- **迁移幂等性（无守卫键）**：v4 分支顺序约束——① 建 4 张新表 + 索引 → ② modules 回填（requirements.module ∪ bugs.module 去重）→ ③ requirement_modules/bug_modules 回填 → ④ 同 (feature,date) 合并 + 子需求生成（content 置功能名、list 展开）→ ⑤ requirements/bugs 重建表去 module 列（加 UNIQUE）。前三步依赖原 module 列，必须在 DROP TABLE 之前完成。靠事务回滚 + `IF NOT EXISTS` + `INSERT OR IGNORE` + 版本升 4 构成可重入。
+- **已知限制**：① 导入/导出本轮**不改动**（解析格式不变、单模块口径），待本轮功能更新后单独重设计新的导入/导出格式需求——已确认。② 子需求不参与导入导出。③ 历史无 module 的需求迁移后无关联模块，归「未分组」。④ bug 不引入 feature（功能关联走既有 `linked_iteration_id`）——已确认。
+
+---
+
+## 导入/导出重设计（2026-08-04 ~ 2026-08-05）
+
+设计方案：`docs/design/import-export-redesign.md`（7 步已全部落地）。重写导入/导出为 **.md 双轨格式**（YAML frontmatter 机器权威 + 正文人类可读）实现无损往返，并新增**智能导入**（OpenAI 兼容 LLM）与**导入前备份/回滚**。关键技术决策：
+
+- **.md 双轨格式（无损往返核心）**：导出 `services/exporter.py` 的 `Exporter.export(snapshot: ParsedProject, include_bug=True) -> str` 生成 `--- YAML frontmatter ---` + `# 项目正文`；frontmatter 为机器权威源（`yaml.safe_dump`），所有引用用**原始 DB id**（保证可复用），正文 `{#短锚点}` 仅装饰、机器不解析。导入 `services/importer.py` 的 `Importer.parse(text) -> ParsedProject` 用 `yaml.safe_load` 读 frontmatter 为权威、正文整体丢弃。中间模型 `ParsedProject` / `ParsedIteration` / `ParsedSubitem` / `ParsedBug` / `ParsedModule` 在 `models/data.py`，导出快照与导入解析共用。新增依赖 `pyyaml`（纯 Python，PyInstaller 友好）。
+- **format_version 与 DB schema 解耦（不合并版本号）**：`format_version`（当前=1，写死 `SUPPORTED_FORMAT_VERSIONS = {1}`）描述 .md frontmatter 结构，**独立于** `CURRENT_DB_SCHEMA_VERSION`（保持 4 不动，描述 SQLite 表结构）。两者演进步调不同步：合并会误拒能导入的文件（DB 加列但格式没变）或无法区分格式变更（DB 没变但字段改名）。importer 只看 `format_version` 判文件兼容，越界拒绝并提示升级。**DB schema 不变**（纯上层功能）。
+- **ID 复用/冲突映射（1:1 还原关联）**：`ProjectService.apply_full_import(target, parsed, *, reuse_id) -> Project` 统一写入路径，单事务失败回滚。写入前扫目标库已占用 ID 与导入集 ID 求交 → 冲突生成新 id 建 `id_map{旧→新}` → 遍历重写**所有引用字段**（`requirements.id` / `requirement_subitems.iteration_id` / `bugs.id` / `bugs.linked_iteration_id` / `requirement_modules.requirement_id` / `bug_modules.bug_id` / `modules.id` / 关联表 `module_id`）。干净实例交集为空、id_map 恒等，1:1 还原。`reuse_id=False`（智能导入）时全量新建。
+- **模块按名合并（先于 requirements）**：模块是共享一等实体（`UNIQUE(project_id,name)`），目标项目已有同名模块 → 复用其 DB id 记入 id_map；不存在 → 用导入 id 建（冲突则映射）。后续 requirements/bugs 的 `modules:[id]` 经 id_map 解析，避免重复建模块。
+- **合并语义 + 不变量**：导入到新项目复用 ID 1:1 还原；导入到已有项目（upsert）迭代按 `(feature,date)`、bug 按 `(date,content)`、模块按 `name` 识别，存在则更新（子需求整体替换）、不存在则新建，ID 冲突走映射。`deferred` 项 `completion_deadline` 强制 NULL（后端写入单点）。Bug 可选导出（`include_bug`，取消勾选时前端动态提示「将丢失：N 条 bug、M 个关联」）。
+- **智能导入（LLM）中间格式（无 ID 无锚点）**：LLM 产不出内部 ID，中间格式 `LlmParsedProject`（`llm/client.py` + `llm/prompt.py` + `llm/schema.py`）对 LLM 友好、缺失字段容忍。bug 关联用 `(linked_feature, linked_date)` 键查目标迭代（命中关联、未命中置空），状态/级别用枚举字符串（prompt 给死合法值）。OpenAI Chat Completions 兼容接口 + **tool use** 强制结构化输出（`httpx` 同步 POST，`Authorization: Bearer`），`from_llm_intermediate` 为模块/迭代/bug 生成内部唯一 id 使 ParsedProject 自洽，提交 `reuse_id=False` 全新建。配置落盘 `settings.json`（`llm_enabled` / `llm_base_url` / `llm_api_key` / `llm_model` / `llm_timeout`，本地明文），未启用时智能导入按钮灰显 + hover 提示。智能导入只支持新建项目（中间格式无 project_id）。
+- **导入前备份与回滚（独立命名空间，复用底层）**：`apply_full_import` 写入事务前调 `DbService.backup_for_import`（复用 `_sqlite_backup` = `sqlite3.Connection.backup()`，WAL 安全），命名 `requment.db.preimport.{时间}.{id}.bak`（区别于迁移备份 `requment.db.v{版本}.{时间}.bak`），含用户数据才备份（`projects` 计数 > 0 守卫）。`storage_dir/backups/manifest.json` 记元信息（id/file/created_at/trigger/source/project_id/project_name/size）。回滚 `restore_backup`：持 `_lock` → `PRAGMA wal_checkpoint(TRUNCATE)` → `shutil.copy` 覆盖 → 删 wal/shm → 删该备份点之后的同类备份（失效），破坏性二次确认文案明确「将永久丢失该备份点之后的所有改动，不可撤销」。保留最近 N 个（`backup_retention_count` 默认 10，`settings_order` 加 `'backup'`），迁移备份永久保留不参与清理。
+- **Step 7 旧代码清理（彻底移除旧 .txt 路径）**：移除后端旧 4 API 方法（`pick_and_parse_import` / `apply_import` / `apply_import_as_new_project` / `export_project`）+ `services/importer.py` 整段旧 `.txt` 宽松解析（`_LegacyTxtImporter` / `parse_import` / `_SeenEntry` / `parse_yymmdd` / `is_separator` / 旧正则常量 / `_STATUS_PRIORITY`）+ `models/data.py` 的 `ParsedRequirement` / `ParsedImport` + `services/project_service.py` 旧 `apply_import` / `apply_import_as_new_project` + `models/requirement.py` 的 `STATUS_SECTION_KEYWORDS` / `LABEL_TO_STATUS`（仅旧解析器用，现死代码；`STATUS_LABEL` 仍被 exporter 用、保留）+ `api.py` 的 `_save_dialog`（仅旧 export_project 用）。测试删除旧 .txt 解析 10 例 + 旧 apply_import 4 例 + `tests/fixtures/sample.txt` + 空 `tests/conftest.py`。前端旧 4 方法在 Step 3 已无调用点，Step 7 仅清注释。
+- **已知限制**：① 智能导入数据无原始 ID，bug 关联靠 `(feature,date)` 解析、未命中置空；② 本地图片本期仅预留 `resources` frontmatter 区不实现打包；③ LLM api_key 本地明文存储（后续可加密）；④ 智能导入只支持新建项目；⑤ .docx 等二进制文档不支持（`errors="replace"` 读为乱码交 LLM 尽力识别）--**已解决**，见下「智能导入多格式文件解析」节。
+
+---
+
+## 智能导入多格式文件解析（2026-08-06）
+
+设计方案：`docs/design/smart-import-file-extraction.md`（已落地）。为 `pick_smart_import_file` 读文件这一环新增**前置解析**，把 Excel/Word 等二进制文档转为结构化纯文本后再交 LLM，解决「二进制读为乱码」限制。关键技术决策：
+
+- **纯函数模块 `services/file_text_extractor.py`**：入口 `extract_text_for_llm(path) -> tuple[str, str]`，返回 `(text, source_format)`。按扩展名（小写）分发：`.xlsx`/`.docx` 走专用解析；`.xls` 抛 `LlmError("旧版 .xls 暂不支持，请另存为 .xlsx")`；其余回退 `read_text(errors="replace")`（含 `.csv`，LLM 原生理解，零回归）。依赖 `openpyxl>=3.1`、`python-docx>=1.1`（均纯 Python，PyInstaller 友好；`python-docx` 拉 `lxml`，Windows 有预编译 wheel）。
+- **Excel 双 Workbook 合并（公式回退，决策 4）**：`load_workbook(data_only=True)` 取缓存计算值 + `load_workbook(data_only=False)` 取公式串；单元格值为空时回退取公式串，避免公式计算未缓存时整列空白。`read_only=True` 流式读，大表不爆内存。每 sheet -> `## 工作表: {name}` + Markdown 表格（首行表头 + `|---|` 分隔行），空表输出 `（空工作表）`。
+- **Word 保序（决策 5）**：`_iter_block_items` 按 `document.element.body` 子元素顺序迭代段落/表格（python-docx cookbook 写法），交错输出段落与表格，避免单独遍历丢序。表格转 Markdown。
+- **集成点仅一行**：`pick_smart_import_file` 内 `read_text` 一行替换为 `extract_text_for_llm`，返回值加 `"source_format"`（决策 10，前端 step1 `ElMessage.info` 提示「已识别为 XLSX 文档」）。**长度校验时机不变**--仍在抽取**之后**判 `len(text) > _LLM_MAX_INPUT_CHARS`，因二进制->Markdown 会放大体积。错误统一抛 `LlmError` -> 现有 `except` -> 错误信封 -> step1 早失败（损坏/加密文件当场报，不进 step2）。
+- **不变量**：`run_smart_import` 及之后的 LLM 调用/预览/应用流程完全不动；纯本地解析无网络；LLM prompt 契约不变；DB schema 不变（无表结构变更、无版本迁移）。
+- **已知限制**：`.xls`（旧二进制 Excel）不支持，需 `xlrd`，本期从成本考虑不做、提示另存 `.xlsx`；`.pdf`/`.pptx` 不支持（未来走同一分发扩展点）；Excel 合并单元格/样式不还原（只取值，LLM 从扁平表格推断）；内嵌图片不抽取（无 OCR）。扩展点已预留：新增格式只需在 `extract_text_for_llm` 加分支。
