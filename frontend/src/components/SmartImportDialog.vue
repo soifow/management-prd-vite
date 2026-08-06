@@ -298,6 +298,45 @@ watch(visible, (v) => {
   </el-dialog>
 </template>
 
+<style>
+/* 全局样式：el-dialog 被 teleport 到 body，scoped 的 data-v 属性与之对齐不可靠，
+   改用 class 纯匹配。.el-dialog.smart-import-dialog 特异性 (0,2,0) 高于 Element Plus
+   默认 .el-dialog (0,1,0)，确保覆盖。所有规则以 smart-import-dialog 为前缀，
+   仅影响智能导入弹窗，不影响普通导入弹窗（ImportPreviewDialog 无此前缀）。 */
+.el-dialog.smart-import-dialog {
+  /* 抵消默认 50px 底边距，避免 5vh + 90vh + 50px 溢出视口 */
+  margin-bottom: 0;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.el-dialog.smart-import-dialog .el-dialog__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 第三步：顶栏/主区域/底栏纵向弹性 */
+.el-dialog.smart-import-dialog .preview-step {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 覆盖 ImportPreviewPanel 的 .main-body 固定 520px，改为填满可用空间并内部滚动 */
+.el-dialog.smart-import-dialog .preview-step .main-body {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+.el-dialog.smart-import-dialog .preview-step .tree-panel,
+.el-dialog.smart-import-dialog .preview-step .detail-panel {
+  min-height: 0;
+}
+</style>
+
 <style scoped>
 .smart-steps {
   margin-bottom: 24px;
@@ -308,43 +347,6 @@ watch(visible, (v) => {
 .smart-steps :deep(.el-step__title.is-process) {
   color: #1d4ed8;
   border-color: #1d4ed8;
-}
-
-.smart-import-dialog {
-  display: flex;
-  flex-direction: column;
-  max-height: 90vh;
-}
-
-/* 弹窗 body 填满 dialog，并让 body 内的弹性链生效 */
-.smart-import-dialog :deep(.el-dialog__body) {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* 第三步容器：让顶栏/主区域/底栏按纵向弹性排布 */
-.preview-step {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 覆盖 ImportPreviewPanel 的 main-body 固定高度，改为填满可用空间；
-   其内部 tree-panel / detail-panel 已有 overflow:auto，会自动滚动 */
-.preview-step :deep(.main-body) {
-  height: auto;
-  flex: 1;
-  min-height: 0;
-}
-
-/* 双重保险：左右面板即使内容再高，也被限制在 main-body 内滚动 */
-.preview-step :deep(.tree-panel),
-.preview-step :deep(.detail-panel) {
-  min-height: 0;
 }
 
 .step-content {
