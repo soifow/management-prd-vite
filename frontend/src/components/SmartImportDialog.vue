@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { DotLottieVue } from '@lottiefiles/dotlottie-vue'
 
 import aiAnalyzingUrl from '@/assets/lottie/ai-analyzing.lottie?url'
+import aiErrorUrl from '@/assets/lottie/ai-error.lottie?url'
 import { useRequirementsStore } from '@/stores/requirements'
 import { useSettingsStore } from '@/stores/settings'
 import type { ParsedProject } from '@/types'
@@ -138,6 +139,7 @@ function startAnalyzing() {
     .catch((e) => {
       if (cancelled.value) return
       clearTimers()
+      // 错误态：进度条卡在超时那一刻的进度（不再前进，也不归零）
       errorMsg.value = e instanceof Error ? e.message : 'AI 分析失败'
     })
 }
@@ -199,6 +201,7 @@ watch(visible, (v) => {
     title="智能导入"
     width="960px"
     top="5vh"
+    class="smart-import-dialog"
     :close-on-click-modal="false"
   >
     <!-- stepper -->
@@ -218,7 +221,7 @@ watch(visible, (v) => {
     <div v-if="step === 'pickFile'" class="step-content">
       <div class="pick-file-hint">
         <p>选择一个需求记录文件，AI将尝试自动识别结构并创建新项目</p>
-        <p class="pick-hint-sub">支持 .txt / .md / .csv / .xlsx / .docx（Excel/Word 将自动解析为文本）</p>
+        <p class="pick-hint-sub">支持 .txt / .md / .csv / .xls / .xlsx / .docx（Excel/Word 将自动解析为文本）</p>
       </div>
       <el-button type="primary" @click="onPickFile">
         选择文件
@@ -227,44 +230,53 @@ watch(visible, (v) => {
 
     <!-- ② AI 分析 -->
     <div v-else-if="step === 'analyzing'" class="step-content">
-      <!-- 正常态：转圈 + 进度 + 计时 -->
-      <template v-if="!errorMsg">
-        <div class="analyzing-overlay">
-          <DotLottieVue
-            :src="aiAnalyzingUrl"
-            autoplay
-            loop
-            class="lottie-spinner"
-          />
-          <p class="analyzing-text">正在调用 {{ llmModel }}，请稍候…</p>
-          <el-progress
-            :percentage="progress"
-            :stroke-width="22"
-            text-inside
-            :color="progressColors"
-            class="progress-bar"
-          />
-          <p class="timer-text">已等待 {{ elapsedFmt }} / 上限 {{ timeoutFmt }}</p>
-          <el-button @click="onCancel">取消</el-button>
-        </div>
-      </template>
+      <div class="analyzing-overlay">
+        <!-- lottie：等待态与错误态切换，结构保持一致 -->
+        <DotLottieVue
+          v-if="!errorMsg"
+          :src="aiAnalyzingUrl"
+          autoplay
+          loop
+          class="lottie-spinner"
+        />
+        <DotLottieVue
+          v-else
+          :src="aiErrorUrl"
+          autoplay
+          loop
+          class="lottie-spinner"
+        />
 
-      <!-- error 态 -->
-      <template v-else>
-        <div class="error-block">
-          <el-alert type="error" :closable="false" show-icon>
-            <template #title>{{ errorMsg }}</template>
-          </el-alert>
-          <div class="error-actions">
+        <!-- 提示文字：错误信息直接复用等待态位置 -->
+        <p class="analyzing-text" :class="{ 'is-error': !!errorMsg }">
+          {{ errorMsg || `正在调用 ${llmModel}，请稍候…` }}
+        </p>
+
+        <!-- 进度条：错误态保留卡住的超时进度，不重置 -->
+        <el-progress
+          :percentage="progress"
+          :stroke-width="22"
+          text-inside
+          :color="progressColors"
+          class="progress-bar"
+        />
+
+        <!-- 计时文本：错误态保持不动 -->
+        <p class="timer-text">已等待 {{ elapsedFmt }} / 上限 {{ timeoutFmt }}</p>
+
+        <!-- 操作按钮：等待态=取消；错误态=重试+关闭 -->
+        <div class="analyzing-actions">
+          <el-button v-if="!errorMsg" @click="onCancel">取消</el-button>
+          <template v-else>
             <el-button type="primary" @click="onRetry">重试</el-button>
             <el-button @click="onCloseError">关闭</el-button>
-          </div>
+          </template>
         </div>
-      </template>
+      </div>
     </div>
 
     <!-- ③ 预览并应用 -->
-    <div v-else-if="step === 'preview' && parsed">
+    <div v-else-if="step === 'preview' && parsed" class="preview-step">
       <ImportPreviewPanel
         :parsed="parsed"
         :target="{ name: '' }"
@@ -289,6 +301,50 @@ watch(visible, (v) => {
 <style scoped>
 .smart-steps {
   margin-bottom: 24px;
+}
+
+/* 当前步骤（process）文字与圆圈改为深蓝色；未执行步骤保持灰色 */
+.smart-steps :deep(.el-step__head.is-process),
+.smart-steps :deep(.el-step__title.is-process) {
+  color: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.smart-import-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+}
+
+/* 弹窗 body 填满 dialog，并让 body 内的弹性链生效 */
+.smart-import-dialog :deep(.el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 第三步容器：让顶栏/主区域/底栏按纵向弹性排布 */
+.preview-step {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 覆盖 ImportPreviewPanel 的 main-body 固定高度，改为填满可用空间；
+   其内部 tree-panel / detail-panel 已有 overflow:auto，会自动滚动 */
+.preview-step :deep(.main-body) {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 双重保险：左右面板即使内容再高，也被限制在 main-body 内滚动 */
+.preview-step :deep(.tree-panel),
+.preview-step :deep(.detail-panel) {
+  min-height: 0;
 }
 
 .step-content {
@@ -320,7 +376,8 @@ watch(visible, (v) => {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  padding: 24px 0;
+  padding: 0;
+  width: 100%;
 }
 .lottie-spinner {
   width: 160px;
@@ -330,10 +387,20 @@ watch(visible, (v) => {
   font-size: 14px;
   color: #374151;
   margin: 0;
+  text-align: center;
+  max-width: 720px;
+}
+/* 错误态文字：复用同一段文字位置，仅切换颜色 */
+.analyzing-text.is-error {
+  color: #dc2626;
+}
+.analyzing-actions {
+  display: flex;
+  gap: 8px;
 }
 .progress-bar {
-  width: 80%;
-  max-width: 760px;
+  width: 90%;
+  max-width: 720px;
 }
 /* lottie 预载宿主：离屏隐藏但保持挂载，触发资源提前加载 */
 .lottie-preload-host {
@@ -349,23 +416,5 @@ watch(visible, (v) => {
   font-size: 13px;
   color: #6b7280;
   margin: 0;
-}
-
-/* error 态 */
-.error-block {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 24px 0;
-  width: 100%;
-}
-.error-block :deep(.el-alert) {
-  max-width: 480px;
-  width: 100%;
-}
-.error-actions {
-  display: flex;
-  gap: 8px;
 }
 </style>
