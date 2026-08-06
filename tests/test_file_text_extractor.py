@@ -14,7 +14,6 @@ import pytest
 from management_prd.errors import LlmError
 from management_prd.services.file_text_extractor import extract_text_for_llm
 
-
 # ── Excel .xlsx ──
 
 
@@ -162,24 +161,69 @@ def test_docx_empty(tmp_path: Path) -> None:
     assert text.strip() == "# 文档: empty"
 
 
-# ── .xls / 纯文本 / 未知扩展名 ──
+# ── .xls / .doc / 纯文本 / 未知扩展名 ──
 
 
-def test_xls_not_supported(tmp_path: Path) -> None:
-    """.xls -> LlmError 含「另存为 .xlsx」。"""
-    path = tmp_path / "old.xls"
+def _write_xls(path: Path) -> None:
+    """用 xlwt 生成最小 .xls fixture（xlrd 只读，写需 xlwt）。"""
+    import xlwt
+
+    wb = xlwt.Workbook()
+    ws1 = wb.add_sheet("主界面")
+    ws1.write(0, 0, "模块")
+    ws1.write(0, 1, "功能")
+    ws1.write(1, 0, "登录")
+    ws1.write(1, 1, "微信登录")
+    ws2 = wb.add_sheet("账户")
+    ws2.write(0, 0, "字段")
+    ws2.write(0, 1, "说明")
+    wb.save(str(path))
+
+
+def test_xls_multi_sheet(tmp_path: Path) -> None:
+    """.xls 多 sheet：输出 `## 工作表` 标题 + Markdown 表格，source_format=xls。"""
+    path = tmp_path / "req.xls"
+    _write_xls(path)
+
+    text, fmt = extract_text_for_llm(path)
+
+    assert fmt == "xls"
+    assert "# 工作簿: req（共 2 个工作表）" in text
+    assert "## 工作表: 主界面" in text
+    assert "## 工作表: 账户" in text
+    assert "| 模块 | 功能 |" in text
+    assert "| --- | --- |" in text
+    assert "| 登录 | 微信登录 |" in text
+
+
+def test_xls_corrupt_raises(tmp_path: Path) -> None:
+    """损坏 .xls -> LlmError 含「无法读取 Excel」。"""
+    path = tmp_path / "bad.xls"
+    path.write_bytes(b"not a real xls")
+
+    with pytest.raises(LlmError) as exc:
+        extract_text_for_llm(path)
+    assert "无法读取 Excel" in str(exc.value)
+
+
+def test_doc_not_supported(tmp_path: Path) -> None:
+    """.doc -> LlmError 含「另存为 .docx」。"""
+    path = tmp_path / "old.doc"
     path.write_bytes(b"anything")
 
     with pytest.raises(LlmError) as exc:
         extract_text_for_llm(path)
-    assert "另存为 .xlsx" in str(exc.value)
+    assert "另存为 .docx" in str(exc.value)
 
 
-@pytest.mark.parametrize("name,expected_fmt", [
-    ("doc.txt", "txt"),
-    ("notes.md", "md"),
-    ("data.csv", "csv"),
-])
+@pytest.mark.parametrize(
+    "name,expected_fmt",
+    [
+        ("doc.txt", "txt"),
+        ("notes.md", "md"),
+        ("data.csv", "csv"),
+    ],
+)
 def test_text_formats(tmp_path: Path, name: str, expected_fmt: str) -> None:
     """文本类扩展名：与 read_text(errors='replace') 等价，source_format 正确。"""
     path = tmp_path / name

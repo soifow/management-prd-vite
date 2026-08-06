@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 from management_prd.errors import LlmError
 
@@ -24,10 +26,12 @@ def extract_text_for_llm(path: Path) -> tuple[str, str]:
     ext = path.suffix.lower()
     if ext == ".xlsx":
         return _extract_xlsx(path)
+    if ext == ".xls":
+        return _extract_xls(path)
     if ext == ".docx":
         return _extract_docx(path)
-    if ext == ".xls":
-        raise LlmError("旧版 .xls 暂不支持，请用 Excel 另存为 .xlsx 后重试")
+    if ext == ".doc":
+        raise LlmError("旧版 .doc 暂不支持，请用 Word 另存为 .docx 后重试")
     # 其余一律按文本读（含 .csv，LLM 原生理解；二进制会乱码，沿用现状）
     text = path.read_text(encoding="utf-8", errors="replace")
     return text, (ext.lstrip(".") or "txt")
@@ -62,7 +66,7 @@ def _extract_xlsx(path: Path) -> tuple[str, str]:
     return "\n".join(parts).strip(), "xlsx"
 
 
-def _sheet_to_markdown(ws, ws_formula) -> str:
+def _sheet_to_markdown(ws: Any, ws_formula: Any) -> str:
     """把单个工作表渲染为 Markdown 表格；无有效行输出（空工作表）。
 
     ``ws`` 为 data_only=True（计算值），``ws_formula`` 为 data_only=False（公式串）；
@@ -70,11 +74,11 @@ def _sheet_to_markdown(ws, ws_formula) -> str:
     """
     lines: list[str] = []
     for row, frow in zip(
-        ws.iter_rows(values_only=True), ws_formula.iter_rows(values_only=True)
+        ws.iter_rows(values_only=True), ws_formula.iter_rows(values_only=True), strict=False
     ):
         cells = [_cell_str(v) for v in row]
         # 回退：值缺失（None/空）的单元格取公式 Workbook 的公式串
-        cells = [c if c else _cell_str(fv) for c, fv in zip(cells, frow)]
+        cells = [c if c else _cell_str(fv) for c, fv in zip(cells, frow, strict=False)]
         if not any(cells):
             continue  # 整行全空跳过
         lines.append("| " + " | ".join(cells) + " |")
@@ -94,6 +98,48 @@ def _cell_str(value: object) -> str:
 
 
 # ──────────────────────────────────────────────────────────────
+# Excel .xls（旧版二进制，xlrd；2.x 仅支持 .xls）
+# ──────────────────────────────────────────────────────────────
+
+
+def _extract_xls(path: Path) -> tuple[str, str]:
+    try:
+        import xlrd
+    except ImportError as e:
+        raise LlmError("Excel(.xls) 解析依赖缺失，请联系开发者") from e
+    try:
+        book = xlrd.open_workbook(str(path))
+    except Exception as e:  # 损坏 / 加密
+        raise LlmError(f"无法读取 Excel 文件：{e}") from e
+
+    parts = [f"# 工作簿: {path.stem}（共 {book.nsheets} 个工作表）\n"]
+    for sheet in book.sheets():
+        parts.append(f"\n## 工作表: {sheet.name}\n")
+        parts.append(_xls_sheet_to_markdown(sheet))
+    return "\n".join(parts).strip(), "xls"
+
+
+def _xls_sheet_to_markdown(sheet: Any) -> str:
+    """把 xlrd 工作表渲染为 Markdown 表格（首行作表头）；无有效行输出（空工作表）。
+
+    xlrd 无公式回退（.xls 公式场景少，直接取缓存值），其余与
+    :func:`_sheet_to_markdown` 同构。
+    """
+    lines: list[str] = []
+    for ri in range(sheet.nrows):
+        cells = [_cell_str(v) for v in sheet.row_values(ri)]
+        if not any(cells):
+            continue  # 整行全空跳过
+        lines.append("| " + " | ".join(cells) + " |")
+    if not lines:
+        return "（空工作表）"
+    header = lines[0]
+    col_count = header.count("|") - 1
+    sep = "| " + " | ".join(["---"] * col_count) + " |"
+    return "\n".join([header, sep, *lines[1:]])
+
+
+# ──────────────────────────────────────────────────────────────
 # Word .docx
 # ──────────────────────────────────────────────────────────────
 
@@ -101,7 +147,6 @@ def _cell_str(value: object) -> str:
 def _extract_docx(path: Path) -> tuple[str, str]:
     try:
         from docx import Document
-        from docx.document import Document as _Doc
         from docx.table import Table
         from docx.text.paragraph import Paragraph
     except ImportError as e:
@@ -126,7 +171,7 @@ def _extract_docx(path: Path) -> tuple[str, str]:
     return "\n\n".join(parts).strip(), "docx"
 
 
-def _table_to_markdown(table) -> str:
+def _table_to_markdown(table: Any) -> str:
     """把 Word 表格渲染为 Markdown 表格（首行作表头）；空表返回空串。"""
     rows: list[list[str]] = []
     for row in table.rows:
@@ -142,9 +187,8 @@ def _table_to_markdown(table) -> str:
     return "\n".join(lines)
 
 
-def _iter_block_items(doc):
+def _iter_block_items(doc: Any) -> Iterator[Any]:
     """按 document.element.body 子元素顺序迭代段落 / 表格（python-docx cookbook 写法）。"""
-    from docx.document import Document as _Doc
     from docx.oxml.ns import qn
     from docx.table import Table
     from docx.text.paragraph import Paragraph

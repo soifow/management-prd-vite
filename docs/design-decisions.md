@@ -91,9 +91,11 @@
 
 设计方案：`docs/design/smart-import-file-extraction.md`（已落地）。为 `pick_smart_import_file` 读文件这一环新增**前置解析**，把 Excel/Word 等二进制文档转为结构化纯文本后再交 LLM，解决「二进制读为乱码」限制。关键技术决策：
 
-- **纯函数模块 `services/file_text_extractor.py`**：入口 `extract_text_for_llm(path) -> tuple[str, str]`，返回 `(text, source_format)`。按扩展名（小写）分发：`.xlsx`/`.docx` 走专用解析；`.xls` 抛 `LlmError("旧版 .xls 暂不支持，请另存为 .xlsx")`；其余回退 `read_text(errors="replace")`（含 `.csv`，LLM 原生理解，零回归）。依赖 `openpyxl>=3.1`、`python-docx>=1.1`（均纯 Python，PyInstaller 友好；`python-docx` 拉 `lxml`，Windows 有预编译 wheel）。
+- **纯函数模块 `services/file_text_extractor.py`**：入口 `extract_text_for_llm(path) -> tuple[str, str]`，返回 `(text, source_format)`。按扩展名（小写）分发：`.xlsx`/`.xls`/`.docx` 走专用解析；`.doc` 抛 `LlmError("旧版 .doc 暂不支持，请用 Word 另存为 .docx 后重试")`；其余回退 `read_text(errors="replace")`（含 `.csv`，LLM 原生理解，零回归）。依赖 `openpyxl>=3.1`、`python-docx>=1.1`、`xlrd>=2.0`（均纯 Python，PyInstaller 友好；`python-docx` 拉 `lxml`，Windows 有预编译 wheel）。
 - **Excel 双 Workbook 合并（公式回退，决策 4）**：`load_workbook(data_only=True)` 取缓存计算值 + `load_workbook(data_only=False)` 取公式串；单元格值为空时回退取公式串，避免公式计算未缓存时整列空白。`read_only=True` 流式读，大表不爆内存。每 sheet -> `## 工作表: {name}` + Markdown 表格（首行表头 + `|---|` 分隔行），空表输出 `（空工作表）`。
 - **Word 保序（决策 5）**：`_iter_block_items` 按 `document.element.body` 子元素顺序迭代段落/表格（python-docx cookbook 写法），交错输出段落与表格，避免单独遍历丢序。表格转 Markdown。
 - **集成点仅一行**：`pick_smart_import_file` 内 `read_text` 一行替换为 `extract_text_for_llm`，返回值加 `"source_format"`（决策 10，前端 step1 `ElMessage.info` 提示「已识别为 XLSX 文档」）。**长度校验时机不变**--仍在抽取**之后**判 `len(text) > _LLM_MAX_INPUT_CHARS`，因二进制->Markdown 会放大体积。错误统一抛 `LlmError` -> 现有 `except` -> 错误信封 -> step1 早失败（损坏/加密文件当场报，不进 step2）。
 - **不变量**：`run_smart_import` 及之后的 LLM 调用/预览/应用流程完全不动；纯本地解析无网络；LLM prompt 契约不变；DB schema 不变（无表结构变更、无版本迁移）。
-- **已知限制**：`.xls`（旧二进制 Excel）不支持，需 `xlrd`，本期从成本考虑不做、提示另存 `.xlsx`；`.pdf`/`.pptx` 不支持（未来走同一分发扩展点）；Excel 合并单元格/样式不还原（只取值，LLM 从扁平表格推断）；内嵌图片不抽取（无 OCR）。扩展点已预留：新增格式只需在 `extract_text_for_llm` 加分支。
+- **`.xls` 支持（2026-08-06 二期落地）**：原先不支持、提示另存 `.xlsx`，本轮用 `xlrd>=2.0`（2.x 仅支持 `.xls`，与 `.xlsx` 的 openpyxl 互补）实现 `_extract_xls`，输出与 `.xlsx` 同构的 Markdown 表格（`## 工作表` + 首行表头），`source_format="xls"`。xlr dr 无公式 Workbook，故**无公式回退**（.xls 公式场景少，直接取缓存值），`_xls_sheet_to_markdown` 与 openpyxl 版同构。测试用 `xlwt`（dev 依赖）生成 `.xls` fixture（xlrd 只读不写）。`.xls` 文件对话框走「所有文件」通配，无需改 `_open_text_file` 过滤器。
+- **`.doc` 不支持（2026-08-06 决策）**：旧版 Word 二进制无可靠纯 Python 解析库（python-docx 仅 `.docx`），pywin32 COM 方案需用户装 MS Word 且 PyInstaller 打包复杂，与项目「纯 Python、可测试」风格相悖，故仍抛 `LlmError("请用 Word 另存为 .docx 后重试")`。`.pdf`/`.pptx` 亦不支持（未来走同一分发扩展点）。
+- **已知限制**：`.doc`/`.pdf`/`.pptx` 不支持；Excel 合并单元格/样式不还原（只取值，LLM 从扁平表格推断）；内嵌图片不抽取（无 OCR）。扩展点已预留：新增格式只需在 `extract_text_for_llm` 加分支。
