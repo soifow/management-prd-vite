@@ -22,7 +22,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
-const { modules, selectedFeature } = storeToRefs(requirementsStore)
+const { modules, selectedFeature, selectedIteration } = storeToRefs(requirementsStore)
 
 // 模块名候选（来自 modules 一等实体表）
 const moduleOptions = computed(() => modules.value.map((m) => m.name))
@@ -61,8 +61,9 @@ watch(
       dateInput.value = editingItem.value.date
       deadlineInput.value = editingItem.value.completion_deadline
     } else {
-      // 新建：预填当前功能的 feature，模块不预填（用户明确选择）
-      moduleNames.value = []
+      // 新建：详情页入口预填当前迭代的模块与功能名（与功能名预填同源：selectedFeature 有值即详情页）；
+      // 主界面「+需求」入口 selectedFeature 为 null，模块与功能名均不预填，保持原逻辑。
+      moduleNames.value = selectedIteration.value ? [...selectedIteration.value.modules] : []
       featureInput.value = selectedFeature.value?.feature ?? ''
       contentInput.value = ''
       statusInput.value = 'todo'

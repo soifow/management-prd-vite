@@ -259,7 +259,7 @@ const subitemProgressText = computed(() => {
 
 <template>
   <div v-if="selectedFeature" class="detail">
-    <el-page-header class="head" @back="onBack">
+    <el-page-header class="head" title="后退" @back="onBack">
       <template #content>
         <span class="title">功能：{{ selectedFeature.feature || '（未命名）' }}</span>
       </template>
