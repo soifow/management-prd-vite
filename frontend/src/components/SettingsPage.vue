@@ -2,7 +2,13 @@
 import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { IPixelCheck, IPixelClose, IPixelFolder, IPixelSortVertical } from '@/constants/icons'
+import {
+  IPixelCheck,
+  IPixelClose,
+  IPixelFolder,
+  IPixelReload,
+  IPixelSortVertical,
+} from '@/constants/icons'
 
 import { useSettingsStore } from '@/stores/settings'
 import { testLlm, whenReady } from '@/api'
@@ -72,6 +78,10 @@ const draftLlmApiKey = ref<string | null>(null)
 const draftLlmModel = ref<string | null>(null)
 const draftLlmTimeout = ref<number | null>(null)
 const testingLlm = ref(false)
+// 测试连接过程反馈：后端为同步 httpx 调用、无法流式，用计时器驱动「阶段提示 + 计时」
+// （不依赖真实网络信号，仅让用户感知"还在跑、测到哪、要等多久"）。
+const llmTestElapsed = ref(0)
+let llmTestTimer: ReturnType<typeof setInterval> | null = null
 // 测试连接结果（常驻展示，避免 toast 一闪而过用户看不到）。null=未测试过。
 type LlmTestResult = {
   status: 'success' | 'error'
@@ -110,6 +120,11 @@ const sortedGroups = computed(() =>
 
 const activeKey = ref<string>(GROUPS[0].key)
 const scrollRef = useTemplateRef<HTMLDivElement>('scrollRef')
+// 只有「用户主动滚动」（滚轮/拖滚动条/触摸/键盘）才允许 scroll-spy 更新高亮；
+// 点击 Tab 触发的程序化平滑滚动一律不更新（高亮由点击直接定格）。
+// 这样既不依赖固定定时器（长距离平滑滚动会超出其时长，导致动画末尾的 scroll 事件
+// 按未完全落位的位置误判、把高亮抢回上一项），也不需关心浏览器 scrollend 兼容性。
+const userDrivenScroll = ref(false)
 
 // 草稿是否已从后端初始化完成（false 时表单不渲染，避免 null 默认值闪现）
 const draftsReady = ref(false)
@@ -147,19 +162,31 @@ onMounted(async () => {
   })
   await nextTick()
   if (scrollRef.value) scrollRef.value.scrollTop = 0
+  // 首次进入对齐高亮与右侧顶部：右侧顶格显示的是「排序后的第一个分组」，
+  // 故高亮初始化为 sortedGroups[0]（而非注册表 GROUPS[0]——用户重排后两者可能不一致，
+  // 且 userDrivenScroll 初始为 false、onScroll 不会跑，若不显式对齐会一直停在错误项）。
+  activeKey.value = sortedGroups.value[0]?.key ?? GROUPS[0].key
 })
+
+// 用户主动滚动输入（滚轮 / 拖滚动条 / 触摸 / 键盘）→ 置位标志，允许 scroll-spy 更新高亮
+function markUserScroll() {
+  userDrivenScroll.value = true
+}
 
 function scrollToGroup(key: string) {
   // 编辑态下禁用点击滚动（避免与拖拽冲突）
   if (editingOrder.value) return
+  // 点击即定格高亮；清除「用户主动滚动」标志，使本次程序化平滑滚动全程不触发 scroll-spy。
   activeKey.value = key
+  userDrivenScroll.value = false
   const el = document.getElementById(`setting-section-${key}`)
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-// scroll-spy：滚动时高亮当前可见分组（按排序后的分组）
+// scroll-spy：仅用户主动滚动时按可见分组更新高亮
 function onScroll() {
-  if (editingOrder.value) return
+  if (editingOrder.value || !userDrivenScroll.value) return
   const container = scrollRef.value
   if (!container) return
   const top = container.scrollTop
@@ -167,7 +194,8 @@ function onScroll() {
   for (const g of sortedGroups.value) {
     const el = document.getElementById(`setting-section-${g.key}`)
     if (!el) continue
-    if (el.offsetTop - 12 <= top) current = g.key
+    // 顶部刚刚越过该卡片即视为当前分组；阈值收紧到 1px 避免与 padding 叠加导致首块判定错位
+    if (el.offsetTop - 1 <= top) current = g.key
   }
   activeKey.value = current
 }
@@ -247,6 +275,53 @@ async function onChangeStorage() {
   }
 }
 
+// ── 测试连接：过程反馈派生量 ──
+// 目标端点（草稿 base_url + 标准路径），展示在「正在测试」状态区便于用户核对填错没
+const testEndpointUrl = computed(() => {
+  const base = (draftLlmBaseUrl.value ?? '').trim().replace(/\/+$/, '')
+  return base ? `${base}/chat/completions` : ''
+})
+const testModelLabel = computed(() => (draftLlmModel.value ?? '').trim())
+const testTimeoutSec = computed(() => draftLlmTimeout.value ?? 120)
+// MM:SS 格式化
+function fmtMmSs(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
+}
+const testElapsedFmt = computed(() => fmtMmSs(llmTestElapsed.value))
+const testTimeoutFmt = computed(() => fmtMmSs(testTimeoutSec.value))
+// 进度：按 elapsed/timeout 线性增长，上限 99%（不假性到 100%）
+const testProgress = computed(() =>
+  Math.min(99, Math.round((llmTestElapsed.value / Math.max(1, testTimeoutSec.value)) * 100)),
+)
+// 阶段提示：时间驱动分段，让用户感知"还在跑"
+const testStageText = computed(() => {
+  const p = testProgress.value
+  if (p < 15) return '正在连接到 API…'
+  if (p < 80) return '等待模型响应…'
+  return '正在解析响应…'
+})
+
+function startLlmTestFeedback() {
+  llmTestElapsed.value = 0
+  // 清掉上一次结果，避免「成功/失败」与「正在测试」同时出现
+  llmTestResult.value = null
+  if (llmTestTimer) clearInterval(llmTestTimer)
+  llmTestTimer = setInterval(() => {
+    llmTestElapsed.value += 1
+  }, 1000)
+}
+
+function stopLlmTestFeedback() {
+  if (llmTestTimer) {
+    clearInterval(llmTestTimer)
+    llmTestTimer = null
+  }
+  llmTestElapsed.value = 0
+}
+
 // 测试 LLM 连接：用表单草稿（未保存也能测），成功后提示
 async function onTestLlm() {
   // 表单渲染（draftsReady）后才可能触发；收窄类型并兜底
@@ -257,6 +332,7 @@ async function onTestLlm() {
     return
   }
   testingLlm.value = true
+  startLlmTestFeedback()
   try {
     const result = await testLlm({
       base_url: baseUrl.trim(),
@@ -279,6 +355,7 @@ async function onTestLlm() {
     }
     ElMessage.error(e instanceof Error ? e.message : '连接失败')
   } finally {
+    stopLlmTestFeedback()
     testingLlm.value = false
   }
 }
@@ -453,7 +530,15 @@ async function onDeleteBackup(id: string, createdAt: string) {
       </div>
 
       <!-- 右：单一可滚动容器 -->
-      <div ref="scrollRef" class="scroll-area" @scroll.passive="onScroll">
+      <div
+        ref="scrollRef"
+        class="scroll-area"
+        @scroll.passive="onScroll"
+        @wheel.passive="markUserScroll"
+        @mousedown.passive="markUserScroll"
+        @touchstart.passive="markUserScroll"
+        @keydown.passive="markUserScroll"
+      >
         <section
           v-for="g in sortedGroups"
           :key="g.key"
@@ -633,6 +718,30 @@ async function onDeleteBackup(id: string, createdAt: string) {
                   测试连接
                 </el-button>
                 <span class="field-hint">验证 API 地址、密钥与模型是否可用</span>
+              </el-form-item>
+              <el-form-item v-if="testingLlm">
+                <div class="llm-test-result is-testing">
+                  <el-icon class="is-loading"><IPixelReload /></el-icon>
+                  <div class="llm-test-text">
+                    <span class="llm-test-title">正在测试连接…</span>
+                    <span v-if="testEndpointUrl" class="llm-test-detail">
+                      目标：{{ testEndpointUrl }}
+                    </span>
+                    <span v-if="testModelLabel" class="llm-test-detail">
+                      模型：{{ testModelLabel }}
+                    </span>
+                    <span class="llm-test-stage">{{ testStageText }}</span>
+                    <el-progress
+                      :percentage="testProgress"
+                      :stroke-width="6"
+                      :show-text="false"
+                      class="llm-test-progress"
+                    />
+                    <span class="llm-test-detail">
+                      已等待 {{ testElapsedFmt }} / 上限 {{ testTimeoutFmt }}
+                    </span>
+                  </div>
+                </div>
               </el-form-item>
               <el-form-item v-if="llmTestResult">
                 <div
@@ -879,6 +988,26 @@ async function onDeleteBackup(id: string, createdAt: string) {
   background: #fef0f0;
   border: 1px solid #fde2e2;
   color: #f56c6c;
+}
+.llm-test-result.is-testing {
+  background: #f5f7fa;
+  border: 1px solid #e5e7eb;
+  color: #409eff;
+}
+.llm-test-result.is-testing .el-icon.is-loading {
+  color: #409eff;
+}
+.llm-test-stage {
+  font-size: 12px;
+  color: #409eff;
+  font-weight: 500;
+}
+.llm-test-progress {
+  max-width: 320px;
+  margin: 2px 0;
+}
+.llm-test-progress :deep(.el-progress-bar__outer) {
+  background-color: #e5e7eb;
 }
 .llm-test-result .el-icon {
   flex-shrink: 0;
