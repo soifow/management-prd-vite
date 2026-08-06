@@ -498,7 +498,7 @@ class WebApi:
                 raise LlmError("智能导入配置不完整：请在设置中填写 API 地址 / 密钥 / 模型")
 
             picked = self._open_text_file(
-                ["文本文件 (*.txt)", "Markdown 文件 (*.md)", "所有文件 (*.*)"]
+                ["所有文件 (*.*)", "文本文件 (*.txt)", "Markdown 文件 (*.md)"]
             )
             if not picked:
                 return None

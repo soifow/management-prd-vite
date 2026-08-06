@@ -47,6 +47,14 @@ const elapsedFmt = computed(() => fmtMmSs(elapsed.value))
 const timeoutFmt = computed(() => fmtMmSs(llmTimeout.value))
 const llmModel = computed(() => settingsStore.llmModel || 'AI')
 
+// 进度条渐变色：随进度增长 红 → 橙 → 蓝 → 绿（设计 §10 进度反馈）
+const progressColors = [
+  { color: '#f56c6c', percentage: 20 },
+  { color: '#e6a23c', percentage: 50 },
+  { color: '#409eff', percentage: 80 },
+  { color: '#67c23a', percentage: 100 },
+]
+
 function fmtMmSs(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60)
   const s = totalSeconds % 60
@@ -184,13 +192,19 @@ watch(visible, (v) => {
 <template>
   <el-dialog
     v-model="visible"
-    title="✨ 智能导入"
+    title="智能导入"
     width="960px"
     top="5vh"
     :close-on-click-modal="false"
   >
     <!-- stepper -->
-    <el-steps :active="stepIndex" finish-status="success" class="smart-steps">
+    <el-steps
+      :active="stepIndex"
+      align-center
+      process-status="process"
+      finish-status="success"
+      class="smart-steps"
+    >
       <el-step title="选择文件" />
       <el-step title="AI 分析" />
       <el-step title="预览并应用" />
@@ -199,7 +213,7 @@ watch(visible, (v) => {
     <!-- ① 选择文件 -->
     <div v-if="step === 'pickFile'" class="step-content">
       <div class="pick-file-hint">
-        <p>选择一个需求文档或文本文件，AI 将自动识别结构并创建新项目。</p>
+        <p>选择一个需求记录文件，AI将尝试自动识别结构并创建新项目</p>
         <p class="pick-hint-sub">支持 .txt / .md / .docx 等文本文件（.docx 可能产生乱码，AI 尽力识别）</p>
       </div>
       <el-button type="primary" @click="onPickFile">
@@ -219,7 +233,13 @@ watch(visible, (v) => {
             class="lottie-spinner"
           />
           <p class="analyzing-text">正在调用 {{ llmModel }}，请稍候…</p>
-          <el-progress :percentage="progress" :stroke-width="6" class="progress-bar" />
+          <el-progress
+            :percentage="progress"
+            :stroke-width="22"
+            text-inside
+            :color="progressColors"
+            class="progress-bar"
+          />
           <p class="timer-text">已等待 {{ elapsedFmt }} / 上限 {{ timeoutFmt }}</p>
           <el-button @click="onCancel">取消</el-button>
         </div>
@@ -250,6 +270,15 @@ watch(visible, (v) => {
         @apply-success="onApplySuccess"
       />
     </div>
+
+    <!-- lottie 预载：dialog 打开即在①隐藏挂载实例，提前完成动画资源的拉取与解析，消除②进入时的 ~2s 空白 -->
+    <div
+      v-if="visible && step === 'pickFile'"
+      class="lottie-preload-host"
+      aria-hidden="true"
+    >
+      <DotLottieVue :src="aiAnalyzingUrl" autoplay loop />
+    </div>
   </el-dialog>
 </template>
 
@@ -259,7 +288,7 @@ watch(visible, (v) => {
 }
 
 .step-content {
-  min-height: 200px;
+  min-height: 380px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -299,7 +328,18 @@ watch(visible, (v) => {
   margin: 0;
 }
 .progress-bar {
-  width: 320px;
+  width: 80%;
+  max-width: 760px;
+}
+/* lottie 预载宿主：离屏隐藏但保持挂载，触发资源提前加载 */
+.lottie-preload-host {
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+  width: 160px;
+  height: 160px;
+  opacity: 0;
+  pointer-events: none;
 }
 .timer-text {
   font-size: 13px;
