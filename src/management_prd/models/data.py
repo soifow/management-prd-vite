@@ -157,11 +157,17 @@ class ProjectSummary(BaseModel):
     :class:`AppSettings.project_list_date_mode` 决定（最新需求日期 / 最新已完成日期 /
     最近操作时间），在 :meth:`ProjectService.list_summaries` 求得。``None`` 表示该项目
     无对应日期（例如尚无需求、或所选口径下无匹配项）。
+
+    ``bug_count`` / ``bug_latest`` 为项目级 bug 维度（bug 总数、最新 bug 日期），
+    供需求侧「隐藏纯 bug 项目」判定与 bug 侧元信息展示。新增字段非建表，由
+    :meth:`ProjectService.list_summaries` 的子查询求得。
     """
 
     id: str
     name: str
     requirement_count: int
+    bug_count: int
+    bug_latest: date | None
     list_date: date | None
     updated_at: datetime.datetime
 

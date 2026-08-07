@@ -7,10 +7,11 @@ import { MdEditor } from 'md-editor-v3'
 import { MD_EDITOR_PROPS } from '@/constants/md-editor'
 import { useProjectsStore } from '@/stores/projects'
 import { useBugsStore } from '@/stores/bugs'
+import { useSettingsStore } from '@/stores/settings'
 import { LEVEL_LABEL } from '@/types/bug'
 import { BUG_STATUS_LABEL } from '@/types/bug'
 import type { BugLevel, BugStatus } from '@/types'
-import { isoDate } from '@/utils'
+import { isoDate, truncateText } from '@/utils'
 
 const props = defineProps<{
   modelValue: boolean
@@ -22,8 +23,15 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
 const projectsStore = useProjectsStore()
 const bugsStore = useBugsStore()
+const settingsStore = useSettingsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
 const { modules } = storeToRefs(bugsStore)
+
+// 功能名显示截断长度（来自设置；0=不截断）
+const featureNameMaxLen = computed(() => settingsStore.featureNameMaxLength)
+function displayFeatureName(name: string): string {
+  return truncateText(name, featureNameMaxLen.value)
+}
 
 const moduleOptions = computed(() => modules.value.map((m) => m.name))
 const moduleNames = ref<string[]>([])
@@ -185,7 +193,7 @@ async function onSubmit() {
             placeholder="选填：选择功能"
             style="flex: 1"
           >
-            <el-option v-for="f in features" :key="f" :label="f" :value="f" />
+            <el-option v-for="f in features" :key="f" :label="displayFeatureName(f)" :value="f" />
           </el-select>
           <el-select
             :model-value="linkedId"

@@ -10,14 +10,14 @@ import { formatDate } from '@/utils'
 
 const store = useRequirementsStore()
 const settingsStore = useSettingsStore()
-const { filteredItems, filters, featureProgressMap } = storeToRefs(store)
+const { filteredItems, filters, currentProgressMap } = storeToRefs(store)
 const { showSubitemProgressInTree } = storeToRefs(settingsStore)
 
 const treeNodes = computed(() =>
   buildFeatureTree(
     filteredItems.value,
     filters.value,
-    showSubitemProgressInTree.value ? featureProgressMap.value : {},
+    showSubitemProgressInTree.value ? currentProgressMap.value : {},
   ),
 )
 const grouped = computed(() => groupByModule(treeNodes.value))

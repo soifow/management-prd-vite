@@ -16,6 +16,7 @@ import {
   listIterations,
   listModules,
   listSubitems,
+  listSubitemProgress,
   parseMdImport,
   pickSmartImportFile as pickSmartImportFileApi,
   runSmartImport as runSmartImportApi,
@@ -64,11 +65,46 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const currentSubitems = ref<RequirementSubitem[]>([])
   const subitemsLoading = ref(false)
   /**
-   * 各 feature 的子需求进度摘要缓存（feature -> {done,total}）。
-   * 仅当设置项 `show_subitem_progress_in_tree` 开启时树形功能节点据此显示 (done/total)；
-   * 进度在 FeatureDetail 打开该 feature 时回填，避免树渲染批量查询。
+   * 各 feature 的子需求进度摘要缓存（{projectId}\x00{feature} -> {done,total}）。
+   * 键带 projectId 前缀避免跨项目同名 feature 串号。项目加载时由后端批量聚合填充，
+   * 子需求/迭代/导入变更后增量重查。视图层经 `currentProgressMap` 取当前项目数据。
    */
   const featureProgressMap = ref<Record<string, { done: number; total: number }>>({})
+
+  /** 组装 featureProgressMap 的键（projectId 隔离，feature 名不应含 \x00）。 */
+  function progressKey(projectId: string, feature: string): string {
+    return `${projectId}\x00${feature}`
+  }
+
+  /** 拉取当前项目各 feature 子需求进度并合并进缓存（保留其他项目旧缓存）。失败静默。 */
+  async function loadSubitemProgress() {
+    if (!project.value) return
+    try {
+      const map = await listSubitemProgress(project.value.id)
+      const prefix = progressKey(project.value.id, '')
+      const next: Record<string, { done: number; total: number }> = {}
+      for (const [k, v] of Object.entries(featureProgressMap.value)) {
+        if (!k.startsWith(prefix)) next[k] = v
+      }
+      for (const [feat, prog] of Object.entries(map)) {
+        next[progressKey(project.value.id, feat)] = prog
+      }
+      featureProgressMap.value = next
+    } catch {
+      // 进度为次要展示数据，失败不阻断主流程
+    }
+  }
+
+  /** 当前项目的子需求进度（键为 feature，供视图直接按 feature 查询）。 */
+  const currentProgressMap = computed<Record<string, { done: number; total: number }>>(() => {
+    if (!project.value) return {}
+    const prefix = progressKey(project.value.id, '')
+    const out: Record<string, { done: number; total: number }> = {}
+    for (const [k, v] of Object.entries(featureProgressMap.value)) {
+      if (k.startsWith(prefix)) out[k.slice(prefix.length)] = v
+    }
+    return out
+  })
 
   const filters = ref({
     dateFrom: '',
@@ -101,6 +137,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
       currentIterations.value = []
       selectedIterationId.value = null
       currentSubitems.value = []
+      // 批量拉取子需求进度（fire-and-forget，不阻塞主流程）
+      void loadSubitemProgress()
     } catch (e) {
       error.value = e instanceof Error ? e.message : '加载项目失败'
       throw e
@@ -141,6 +179,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     project.value = null
     modules.value = []
     closeFeature()
+    featureProgressMap.value = {}
   }
 
   async function selectIteration(id: string) {
@@ -159,16 +198,6 @@ export const useRequirementsStore = defineStore('requirements', () => {
     subitemsLoading.value = true
     try {
       currentSubitems.value = await listSubitems(iterationId)
-      // 回填 feature 子需求进度摘要（供树形节点显示）
-      const feat = selectedFeature.value?.feature
-      if (feat && currentIterations.value.length > 0) {
-        // 聚合该 feature 所有迭代的子需求总数。简化：只缓存当前迭代的子需求数。
-        const total = currentSubitems.value.length
-        const done = currentSubitems.value.filter((s) => s.status === 'done').length
-        if (total > 0) {
-          featureProgressMap.value = { ...featureProgressMap.value, [feat]: { done, total } }
-        }
-      }
     } finally {
       subitemsLoading.value = false
     }
@@ -187,6 +216,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
       completion_deadline: completionDeadline ?? undefined,
     })
     await loadSubitems(iterationId)
+    void loadSubitemProgress()
     refreshTodo()
     return sub
   }
@@ -195,6 +225,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     const sub = await updateSubitem(subitemId, patch)
     const itId = selectedIterationId.value
     if (itId) await loadSubitems(itId)
+    void loadSubitemProgress()
     refreshTodo()
     return sub
   }
@@ -203,6 +234,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     const sub = await setSubitemStatus(subitemId, status)
     const itId = selectedIterationId.value
     if (itId) await loadSubitems(itId)
+    void loadSubitemProgress()
     refreshTodo()
     return sub
   }
@@ -211,6 +243,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     await deleteSubitem(subitemId)
     const itId = selectedIterationId.value
     if (itId) await loadSubitems(itId)
+    void loadSubitemProgress()
     refreshTodo()
   }
 
@@ -285,6 +318,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
       modules.value = await listModules(project.value.id)
       // 同步刷新侧边栏项目汇总：需求的增删改会影响 list_date / requirement_count / 排序
       await useProjectsStore().loadSummaries()
+      // 迭代变更可能级联影响子需求进度（如删迭代级联删子需求、改 feature 归属）
+      void loadSubitemProgress()
     }
   }
 
@@ -318,6 +353,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     if (target.project_id && project.value?.id === target.project_id) {
       project.value = p
       modules.value = await listModules(project.value.id)
+      void loadSubitemProgress()
     }
     refreshTodo()
     return p
@@ -340,6 +376,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     currentSubitems,
     subitemsLoading,
     featureProgressMap,
+    currentProgressMap,
     filters,
     loading,
     error,

@@ -36,6 +36,8 @@ def test_load_returns_default_when_missing(bootstrap: BootstrapService) -> None:
     assert settings.show_no_deadline_in_todo is True
     assert settings.show_subitem_progress_in_tree is False
     assert settings.backup_retention_count == 10
+    assert settings.hide_bug_only_projects is False
+    assert settings.feature_name_max_length == 12
 
 
 def test_save_and_load_roundtrip(bootstrap: BootstrapService) -> None:
@@ -81,6 +83,8 @@ def test_get_settings_dict(bootstrap: BootstrapService) -> None:
         "llm_model": "",
         "llm_timeout": 120,
         "backup_retention_count": 10,
+        "hide_bug_only_projects": False,
+        "feature_name_max_length": 12,
     }
 
 

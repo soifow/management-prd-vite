@@ -13,7 +13,7 @@ import type { BugLevel, BugStatus } from '@/types'
 const projectsStore = useProjectsStore()
 const bugsStore = useBugsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
-const { filters, modules } = storeToRefs(bugsStore)
+const { filters } = storeToRefs(bugsStore)
 
 const editVisible = ref(false)
 
@@ -30,10 +30,8 @@ function openCreate() {
     ElMessage.warning('请先选择项目')
     return
   }
-  if (modules.value.length === 0) {
-    ElMessage.warning('该项目暂无模块（需求中未定义模块），无法创建 bug')
-    return
-  }
+  // 无模块不再拦截：BugEditDialog 模块控件为 allow-create，可手动输入模块名；
+  // 后端 create_bug 的 ensure_modules 会按名自动建模块（见「需求与 Bug 项目独立」方案）。
   editVisible.value = true
 }
 </script>

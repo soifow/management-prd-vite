@@ -7,9 +7,10 @@ import { MdEditor } from 'md-editor-v3'
 import { MD_EDITOR_PROPS } from '@/constants/md-editor'
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
+import { useSettingsStore } from '@/stores/settings'
 import type { RequirementStatus } from '@/types'
 import { STATUS_LABEL } from '@/types/requirement'
-import { isoDate } from '@/utils'
+import { isoDate, truncateText } from '@/utils'
 
 const props = defineProps<{
   modelValue: boolean
@@ -21,8 +22,15 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
 const projectsStore = useProjectsStore()
 const requirementsStore = useRequirementsStore()
+const settingsStore = useSettingsStore()
 const { activeProjectId } = storeToRefs(projectsStore)
 const { modules, selectedFeature, selectedIteration } = storeToRefs(requirementsStore)
+
+// 功能名显示截断长度（来自设置；0=不截断）
+const featureNameMaxLen = computed(() => settingsStore.featureNameMaxLength)
+function displayFeatureName(name: string): string {
+  return truncateText(name, featureNameMaxLen.value)
+}
 
 // 模块名候选（来自 modules 一等实体表）
 const moduleOptions = computed(() => modules.value.map((m) => m.name))
@@ -168,7 +176,7 @@ async function onSubmit() {
           placeholder="选择或输入功能名（同名功能聚合为迭代）"
           style="width: 100%"
         >
-          <el-option v-for="f in featureOptions" :key="f" :label="f" :value="f" />
+          <el-option v-for="f in featureOptions" :key="f" :label="displayFeatureName(f)" :value="f" />
         </el-select>
       </el-form-item>
       <el-form-item label="状态">

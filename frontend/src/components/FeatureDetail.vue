@@ -8,13 +8,15 @@ import { MD_EDITOR_PROPS } from '@/constants/md-editor'
 import { IPixelPlus, IPixelTrash } from '@/constants/icons'
 import { useProjectsStore } from '@/stores/projects'
 import { useRequirementsStore } from '@/stores/requirements'
+import { useSettingsStore } from '@/stores/settings'
 import type { RequirementStatus, RequirementSubitem } from '@/types'
 import { STATUS_LABEL, STATUS_TAG_TYPE } from '@/types/requirement'
-import { formatDate } from '@/utils'
+import { formatDate, truncateText } from '@/utils'
 import RequirementEditDialog from '@/components/RequirementEditDialog.vue'
 
 const projectsStore = useProjectsStore()
 const store = useRequirementsStore()
+const settingsStore = useSettingsStore()
 const {
   selectedFeature,
   currentIterations,
@@ -24,6 +26,13 @@ const {
   modules,
 } = storeToRefs(store)
 const { activeProjectId } = storeToRefs(projectsStore)
+
+// 功能名显示截断长度（来自设置；0=不截断）
+const featureNameMaxLen = computed(() => settingsStore.featureNameMaxLength)
+/** 按设置截断功能名（仅展示用）。 */
+function displayFeatureName(name: string): string {
+  return truncateText(name, featureNameMaxLen.value)
+}
 
 const editVisible = ref(false)
 
@@ -261,7 +270,9 @@ const subitemProgressText = computed(() => {
   <div v-if="selectedFeature" class="detail">
     <el-page-header class="head" title="后退" @back="onBack">
       <template #content>
-        <span class="title">功能：{{ selectedFeature.feature || '（未命名）' }}</span>
+        <span class="title" :title="selectedFeature.feature || ''">
+          功能：{{ displayFeatureName(selectedFeature.feature) || '（未命名）' }}
+        </span>
       </template>
       <template #extra>
         <el-button :icon="IPixelPlus" type="primary" @click="onNewIteration">新建迭代</el-button>
@@ -288,7 +299,7 @@ const subitemProgressText = computed(() => {
               <el-option v-for="m in moduleOptions" :key="m" :label="m" :value="m" />
             </el-select>
             <el-select v-model="bufferFeature" size="small" filterable allow-create placeholder="功能名称" style="width: 160px">
-              <el-option v-for="f in featureOptions" :key="f" :label="f" :value="f" />
+              <el-option v-for="f in featureOptions" :key="f" :label="displayFeatureName(f)" :value="f" />
             </el-select>
             <el-select v-model="bufferStatus" size="small" style="width: 130px">
               <el-option v-for="s in statusOptions" :key="s" :label="STATUS_LABEL[s]" :value="s" />

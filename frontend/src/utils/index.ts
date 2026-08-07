@@ -31,3 +31,15 @@ export function isoDate(d?: Date | string): string {
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 }
+
+/**
+ * 文本显示截断：超过 maxLen 个字符则截断并追加「…」，maxLen<=0 表示不截断。
+ * 仅用于 UI 显示，不影响存储值。用 Array.from 按 Unicode 码点切片，避免 emoji/扩展
+ * 字符被拆成半个。
+ */
+export function truncateText(text: string, maxLen: number): string {
+  if (!text || maxLen <= 0) return text
+  const chars = Array.from(text)
+  if (chars.length <= maxLen) return text
+  return `${chars.slice(0, maxLen).join('')}…`
+}

@@ -96,6 +96,10 @@ const draftBackupRetention = ref<number | null>(null)
 
 // 项目列表日期口径草稿（保存时一并落盘）
 const draftProjectListDateMode = ref<ProjectListDateMode | null>(null)
+// 需求侧默认隐藏「仅 bug」项目草稿（保存时一并落盘）
+const draftHideBugOnlyProjects = ref<boolean | null>(null)
+// 功能名截断长度草稿（保存时一并落盘；0=不截断）
+const draftFeatureNameMaxLength = ref<number | null>(null)
 
 // 紧急阈值必定 ≤ 提醒阈值：当提醒阈值被下调到低于当前紧急阈值时，
 // 自动把紧急阈值对齐到提醒阈值（后端校验器同样拒绝前者 > 后者）。
@@ -155,6 +159,8 @@ onMounted(async () => {
   draftLlmTimeout.value = settingsStore.llmTimeout
   draftBackupRetention.value = settingsStore.backupRetentionCount
   draftProjectListDateMode.value = settingsStore.projectListDateMode
+  draftHideBugOnlyProjects.value = settingsStore.hideBugOnlyProjects
+  draftFeatureNameMaxLength.value = settingsStore.featureNameMaxLength
   draftsReady.value = true
   // 备份清单容错加载：失败不阻断设置页其余初始化
   void settingsStore.loadImportBackups().catch(() => {
@@ -360,8 +366,8 @@ async function onTestLlm() {
   }
 }
 
-// 保存：落盘「默认聚合方式」+「项目列表日期口径」+「提醒设置」+「LLM 配置」，
-// 不回写主界面当前视图（二者解耦：默认值只在冷启动生效）
+// 保存：落盘「默认聚合方式」+「项目列表日期口径」+「需求侧隐藏仅 bug 项目」+
+// 「提醒设置」+「LLM 配置」，不回写主界面当前视图（二者解耦：默认值只在冷启动生效）
 const saving = ref(false)
 async function onSave() {
   if (saving.value) return
@@ -406,6 +412,14 @@ async function onSave() {
       {
         name: '备份保留数量',
         run: () => settingsStore.saveBackupRetentionCount(draftBackupRetention.value!),
+      },
+      {
+        name: '需求侧隐藏仅 bug 项目',
+        run: () => settingsStore.saveHideBugOnlyProjects(draftHideBugOnlyProjects.value!),
+      },
+      {
+        name: '功能名截断长度',
+        run: () => settingsStore.saveFeatureNameMaxLength(draftFeatureNameMaxLength.value!),
       },
     ]
     for (const step of steps) {
@@ -601,6 +615,27 @@ async function onDeleteBackup(id: string, createdAt: string) {
                 </el-select>
                 <span v-if="dateModeDesc" class="field-hint">{{ dateModeDesc }}</span>
               </el-form-item>
+              <el-form-item label="需求侧默认显示范围">
+                <el-radio-group v-model="draftHideBugOnlyProjects">
+                  <el-radio :value="true">仅显示含需求的项目</el-radio>
+                  <el-radio :value="false">显示全部项目</el-radio>
+                </el-radio-group>
+                <span class="field-hint">
+                  程序冷启动时需求视图默认显示的项目范围。选「仅显示含需求的项目」时，仅存 bug 的项目需在工作区顶部切到「全部」查看。此设置仅决定冷启动默认值，与工作区当前开关相互独立——工作区切换不会修改这里。bug 视图始终显示全部项目。
+                </span>
+              </el-form-item>
+              <el-form-item label="功能名截断长度">
+                <el-input-number
+                  v-model="draftFeatureNameMaxLength"
+                  :min="0"
+                  :max="100"
+                  :step="1"
+                  style="width: 160px"
+                />
+                <span class="field-hint">
+                  功能名超过该长度时在「功能详情头部」与「功能下拉框选项」中截断并加省略号，防止超长功能名撑乱布局；仅影响显示，不影响存储的功能名。填 0 表示不截断。
+                </span>
+              </el-form-item>
             </el-form>
           </template>
 
@@ -650,12 +685,12 @@ async function onDeleteBackup(id: string, createdAt: string) {
           <template v-else-if="g.key === 'subitem'">
             <h3 class="section-title">子需求进度</h3>
             <p class="section-desc">
-              控制树形功能节点是否显示子需求完成进度（done/total）。关闭时仅在功能详情页显示子需求进度信息。
+              控制需求列表中功能节点是否显示子需求完成进度（done/total），作用于树形视图与时间聚合视图。关闭时仅在功能详情页显示子需求进度信息。
             </p>
             <el-form label-position="top">
-              <el-form-item label="树形显示子需求进度">
+              <el-form-item label="功能节点显示子需求进度">
                 <el-switch v-model="draftShowSubitemProgress" />
-                <span class="field-hint">开启时，树形功能节点追加 (完成数/总数) 进度显示</span>
+                <span class="field-hint">开启时，需求列表中的卡片会显示其子需求的进度（完成数/总数）</span>
               </el-form-item>
             </el-form>
           </template>

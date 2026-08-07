@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -26,6 +26,33 @@ const requirementsStore = useRequirementsStore()
 const settingsStore = useSettingsStore()
 const { summaries, activeProjectId } = storeToRefs(projectsStore)
 const { viewMode, smartImporting } = storeToRefs(requirementsStore)
+
+// 需求侧视图过滤：默认按设置「隐藏仅 bug 项目」，顶部开关可一键切到全量列表。
+// 需求视图与 bug 视图是同一份项目列表上的两个视角，此处仅做视图层过滤，不涉及数据。
+const showAll = ref(!settingsStore.hideBugOnlyProjects)
+
+// 启动同步一次即脱钩：本组件随 v-show 立即挂载，settingsStore.loadSettings() 尚未完成，
+// 上方 ref 读到的是 store 默认值 true → showAll=false。待 loadSettings 落定后
+// settingsLoaded 置 true，触发本 watch 把 showAll 对齐到设置的真实默认值，随后立即停用 watch。
+// 之后两侧彻底独立——会话内切换工作区开关不写回设置、改设置不重置工作区开关
+// （与默认聚合方式 defaultViewMode 语义一致）。
+const stopSync = watch(
+  () => settingsStore.settingsLoaded,
+  (loaded) => {
+    if (!loaded) return
+    showAll.value = !settingsStore.hideBugOnlyProjects
+    stopSync()
+  },
+  { immediate: true },
+)
+
+// 展示用项目列表：showAll 时为全量；否则只保留含需求的项目（requirement_count > 0）。
+// 纯 bug 项目（requirement_count===0 且 bug_count>0）被隐藏，但开关打开后仍可见。
+const visibleProjects = computed(() =>
+  showAll.value
+    ? summaries.value
+    : summaries.value.filter((s) => s.requirement_count > 0),
+)
 
 // 智能导入就绪：启用开关 + API 地址 / 密钥 / 模型 齐全
 const llmReady = computed(
@@ -63,9 +90,15 @@ async function onDelete(id: string) {
   const summary = summaries.value.find((s) => s.id === id)
   const name = summary?.name ?? ''
   const count = summary?.requirement_count ?? 0
+  const bugCount = summary?.bug_count ?? 0
+  // 删除提示同时含需求与 bug 计数（项目是共享一等实体，两侧数据都会级联删除）。
+  const detail =
+    bugCount > 0
+      ? `将级联删除其 ${count} 条需求与 ${bugCount} 条 bug`
+      : `将级联删除其 ${count} 条需求`
   try {
     await ElMessageBox.confirm(
-      `确定删除项目「${name}」吗？将级联删除其 ${count} 条需求，且无法恢复。`,
+      `确定删除项目「${name}」吗？${detail}，且无法恢复。`,
       '删除项目',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
@@ -86,7 +119,13 @@ function onRename(id: string) {
 }
 
 function selectProject(id: string) {
+  // 点击当前已选项目时 activeProjectId 不变，App.vue 的 watch 不会触发 reload；
+  // 需显式重载以关闭功能详情、回到该项目需求列表，与点击其他项目行为保持一致。
+  const isActive = activeProjectId.value === id
   projectsStore.select(id)
+  if (isActive) {
+    void requirementsStore.loadProject(id)
+  }
 }
 
 // 导入到当前项目：需先选中项目
@@ -129,15 +168,23 @@ async function onSmartImport() {
   <div class="sidebar">
     <div class="header">
       <span class="title">项目</span>
-      <el-switch
-        :model-value="viewMode"
-        size="small"
-        active-value="date"
-        inactive-value="module"
-        active-text="时间"
-        inactive-text="模块"
-        @change="onViewModeChange"
-      />
+      <div class="header-switches">
+        <el-switch
+          :model-value="viewMode"
+          size="small"
+          active-value="date"
+          inactive-value="module"
+          active-text="时间"
+          inactive-text="模块"
+          @change="onViewModeChange"
+        />
+        <el-switch
+          v-model="showAll"
+          size="small"
+          active-text="全部"
+          inactive-text="需求"
+        />
+      </div>
     </div>
 
     <div class="actions">
@@ -178,10 +225,13 @@ async function onSmartImport() {
 
     <div class="list">
       <div
-        v-for="p in summaries"
+        v-for="p in visibleProjects"
         :key="p.id"
         class="item"
-        :class="{ active: p.id === activeProjectId }"
+        :class="{
+          active: p.id === activeProjectId,
+          'bug-only': p.requirement_count === 0 && p.bug_count > 0,
+        }"
         @click="selectProject(p.id)"
       >
         <div class="item-top">
@@ -193,6 +243,9 @@ async function onSmartImport() {
         </div>
         <div class="item-meta">
           <span>{{ p.requirement_count }} 条需求</span>
+          <span v-if="p.requirement_count === 0 && p.bug_count > 0" class="tag-bug-only">
+            仅 bug {{ p.bug_count }}
+          </span>
           <span v-if="p.list_date" class="date-tag">
             最新 {{ formatDate(p.list_date) }}
           </span>
@@ -224,6 +277,12 @@ async function onSmartImport() {
   align-items: center;
   padding: 16px 16px 8px;
   gap: 8px;
+}
+.header-switches {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
 .title {
   font-weight: 600;
@@ -276,6 +335,18 @@ async function onSmartImport() {
   /* 左侧蓝色竖线明确标识当前项目（不影响布局） */
   box-shadow: inset 3px 0 0 0 #409eff;
 }
+/* 纯 bug 项目：默认隐藏，显示全部后弱化显示 */
+.item.bug-only {
+  opacity: 0.75;
+  background: #f9fafb;
+}
+.item.bug-only:hover {
+  background: #f3f4f6;
+  opacity: 1;
+}
+.item.bug-only .name {
+  color: #6b7280;
+}
 .item-top {
   display: flex;
   justify-content: space-between;
@@ -307,6 +378,14 @@ async function onSmartImport() {
 }
 .date-tag {
   color: #d97706;
+  font-weight: 500;
+}
+.tag-bug-only {
+  color: #9ca3af;
+  font-size: 11px;
+  background: #f3f4f6;
+  padding: 1px 6px;
+  border-radius: 3px;
   font-weight: 500;
 }
 .empty {

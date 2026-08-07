@@ -37,9 +37,14 @@ async function onDelete(id: string) {
   const summary = summaries.value.find((s) => s.id === id)
   const name = summary?.name ?? ''
   const count = summary?.requirement_count ?? 0
+  const bugCount = summary?.bug_count ?? 0
+  const detail =
+    count > 0
+      ? `将级联删除其 ${bugCount} 条 bug 与 ${count} 条需求`
+      : `将级联删除其 ${bugCount} 条 bug`
   try {
     await ElMessageBox.confirm(
-      `确定删除项目「${name}」吗？将级联删除其 ${count} 条需求与全部 bug，且无法恢复。`,
+      `确定删除项目「${name}」吗？${detail}，且无法恢复。`,
       '删除项目',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
@@ -102,8 +107,9 @@ function selectProject(id: string) {
             <el-icon @click.stop="onDelete(p.id)"><IPixelTrash /></el-icon>
           </span>
         </div>
-        <div v-if="p.list_date" class="item-meta">
-          <span class="date-tag">最新 {{ formatDate(p.list_date) }}</span>
+        <div class="item-meta">
+          <span>{{ p.bug_count }} 个 bug</span>
+          <span v-if="p.bug_latest" class="date-tag">最近 {{ formatDate(p.bug_latest) }}</span>
         </div>
       </div>
       <div v-if="summaries.length === 0" class="empty">暂无项目，请新建</div>

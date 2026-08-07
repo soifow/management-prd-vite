@@ -31,7 +31,7 @@ export interface AppSettings {
   urgent_warning_color: string
   /** 无完成时限的未完成需求是否常驻待办列表 */
   show_no_deadline_in_todo: boolean
-  /** 树形功能节点是否显示子需求进度 (done/total)；关则仅功能详情页显示 */
+  /** 功能节点是否显示子需求进度 (done/total)（树形 + 时间聚合）；关则仅功能详情页显示 */
   show_subitem_progress_in_tree: boolean
   /** 是否启用智能导入（LLM 结构化解析） */
   llm_enabled: boolean
@@ -45,4 +45,8 @@ export interface AppSettings {
   llm_timeout: number
   /** 导入备份自动清理保留数量（保留最近 N 个；schema 迁移备份永久保留不参与清理） */
   backup_retention_count: number
+  /** 需求侧默认是否隐藏仅存 bug 的项目（bug 侧始终显示全部项目） */
+  hide_bug_only_projects: boolean
+  /** 功能名显示截断长度：超过则截断加省略号（仅显示，不存）；0 表示不截断 */
+  feature_name_max_length: number
 }

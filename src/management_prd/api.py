@@ -203,6 +203,13 @@ class WebApi:
         except (ManagementPrdError, ValueError) as exc:
             return _err(exc)
 
+    def subitem_progress_map(self, project_id: str) -> object:
+        """批量返回项目内各 feature 的子需求进度（feature -> {done,total}）。"""
+        try:
+            return self._project_service.subitem_progress_map(project_id)
+        except (ManagementPrdError, ValueError) as exc:
+            return _err(exc)
+
     def create_subitem(self, iteration_id: str, input_dict: dict[str, object]) -> object:
         try:
             input_ = self._coerce_create_subitem_input(iteration_id, input_dict)

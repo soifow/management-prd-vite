@@ -18,7 +18,7 @@ export interface FeatureNode {
 
 v4 改动：一条多 module 需求在其关联的每个模块下展开为一个 FeatureNode（同一份
 iterations）。空关联（modules 为空）归入「（未分组）」。子需求进度摘要来自外部
-传入的 ``progressMap``（feature -> {done,total}），避免树渲染时批量查询。 */
+传入的 ``progressMap``（feature -> {done,total}），由 store 在项目加载时批量查询。 */
 export function buildFeatureTree(
   items: RequirementItem[],
   filters: {

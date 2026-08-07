@@ -36,7 +36,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const urgentWarningColor = ref('#dc2626')
   // 待办提醒：无时限需求是否常驻待办列表
   const showNoDeadlineInTodo = ref(true)
-  // 树形功能节点是否显示子需求进度 (done/total)
+  // 功能节点是否显示子需求进度 (done/total)（树形 + 时间聚合视图）
   const showSubitemProgressInTree = ref(false)
   // LLM 智能导入配置
   const llmEnabled = ref(false)
@@ -46,6 +46,13 @@ export const useSettingsStore = defineStore('settings', () => {
   const llmTimeout = ref(120)
   // 导入备份自动清理保留数量
   const backupRetentionCount = ref(10)
+  // 需求侧默认是否隐藏仅存 bug 的项目（仅作冷启动时工作区「需求/全部」开关的默认值）
+  const hideBugOnlyProjects = ref(false)
+  // 功能名显示截断长度（超出加省略号；0=不截断）
+  const featureNameMaxLength = ref(12)
+  // 应用设置是否已从后端加载完成：启动时序标志，供 ProjectSidebar 等组件在 loadSettings
+  // 落定后取一次设置默认值再脱钩（与会话内临时切换互不影响）。
+  const settingsLoaded = ref(false)
   // 导入前备份清单（最新在前）
   const importBackups = ref<ImportBackupEntry[]>([])
 
@@ -79,6 +86,9 @@ export const useSettingsStore = defineStore('settings', () => {
     llmModel.value = settings.llm_model
     llmTimeout.value = settings.llm_timeout
     backupRetentionCount.value = settings.backup_retention_count
+    hideBugOnlyProjects.value = settings.hide_bug_only_projects
+    featureNameMaxLength.value = settings.feature_name_max_length
+    settingsLoaded.value = true
   }
 
   /** 修改默认聚合方式并落盘。 */
@@ -125,7 +135,7 @@ export const useSettingsStore = defineStore('settings', () => {
     showNoDeadlineInTodo.value = settings.show_no_deadline_in_todo
   }
 
-  /** 修改「树形显示子需求进度」开关并落盘。 */
+  /** 修改「功能节点显示子需求进度」开关并落盘。 */
   async function saveSubitemProgressInTree(show: boolean) {
     const settings = await updateSettings({ show_subitem_progress_in_tree: show })
     showSubitemProgressInTree.value = settings.show_subitem_progress_in_tree
@@ -159,6 +169,22 @@ export const useSettingsStore = defineStore('settings', () => {
   async function saveBackupRetentionCount(count: number) {
     const settings = await updateSettings({ backup_retention_count: count })
     backupRetentionCount.value = settings.backup_retention_count
+  }
+
+  /**
+   * 修改「需求侧默认隐藏仅 bug 项目」并落盘。
+   * 该值仅作为下次冷启动时工作区「需求/全部」开关的默认值，与会话内当前开关值相互独立
+   * （与默认聚合方式 defaultViewMode 语义一致）；故此处仅落盘，不重置当前侧边栏过滤状态。
+   */
+  async function saveHideBugOnlyProjects(hide: boolean) {
+    const settings = await updateSettings({ hide_bug_only_projects: hide })
+    hideBugOnlyProjects.value = settings.hide_bug_only_projects
+  }
+
+  /** 修改功能名截断长度并落盘。该值仅影响功能名显示，不回流已存储数据。 */
+  async function saveFeatureNameMaxLength(length: number) {
+    const settings = await updateSettings({ feature_name_max_length: length })
+    featureNameMaxLength.value = settings.feature_name_max_length
   }
 
   /** 加载导入前备份清单（最新在前）。 */
@@ -232,6 +258,9 @@ export const useSettingsStore = defineStore('settings', () => {
     llmModel,
     llmTimeout,
     backupRetentionCount,
+    hideBugOnlyProjects,
+    featureNameMaxLength,
+    settingsLoaded,
     importBackups,
     loadStorageInfo,
     loadSettings,
@@ -242,6 +271,8 @@ export const useSettingsStore = defineStore('settings', () => {
     saveSubitemProgressInTree,
     saveLlmConfig,
     saveBackupRetentionCount,
+    saveHideBugOnlyProjects,
+    saveFeatureNameMaxLength,
     loadImportBackups,
     restoreImportBackupById,
     deleteImportBackupById,

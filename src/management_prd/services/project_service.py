@@ -65,6 +65,11 @@ _DATE_MODE_ORDER: dict[str, str] = {
     "latest_activity": "p.updated_at DESC, p.created_at ASC",
 }
 
+# 项目摘要的 bug 维度子查询（bug 总数 / 最新 bug 日期），list_summaries 与
+# rename_project 的内联 select 共用，确保两侧 ProjectSummary 字段一致。
+_BUG_COUNT_SELECT = "(SELECT COUNT(*) FROM bugs b WHERE b.project_id = p.id)"
+_BUG_LATEST_SELECT = "(SELECT MAX(b.date) FROM bugs b WHERE b.project_id = p.id)"
+
 
 @dataclass(frozen=True)
 class ProjectTarget:
@@ -143,6 +148,8 @@ class ProjectService:
                 f"""
                 SELECT p.id, p.name, p.created_at, p.updated_at,
                        (SELECT COUNT(*) FROM requirements r WHERE r.project_id = p.id) AS cnt,
+                       {_BUG_COUNT_SELECT} AS bug_cnt,
+                       {_BUG_LATEST_SELECT} AS bug_latest,
                        {select} AS latest
                 FROM projects p
                 ORDER BY {order}
@@ -153,10 +160,13 @@ class ProjectService:
     @staticmethod
     def _summary_from_row(row: Row) -> ProjectSummary:
         latest = date.fromisoformat(row["latest"]) if row["latest"] else None
+        bug_latest = date.fromisoformat(row["bug_latest"]) if row["bug_latest"] else None
         return ProjectSummary(
             id=row["id"],
             name=row["name"],
             requirement_count=row["cnt"],
+            bug_count=row["bug_cnt"],
+            bug_latest=bug_latest,
             list_date=latest,
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
@@ -198,6 +208,8 @@ class ProjectService:
             id=project.id,
             name=project.name,
             requirement_count=0,
+            bug_count=0,
+            bug_latest=None,
             list_date=None,
             updated_at=now,
         )
@@ -226,6 +238,8 @@ class ProjectService:
                     f"""
                     SELECT p.id, p.name, p.created_at, p.updated_at,
                            (SELECT COUNT(*) FROM requirements r WHERE r.project_id = p.id) AS cnt,
+                           {_BUG_COUNT_SELECT} AS bug_cnt,
+                           {_BUG_LATEST_SELECT} AS bug_latest,
                            {select} AS latest
                     FROM projects p WHERE p.id = ?
                     """,
@@ -687,6 +701,30 @@ class ProjectService:
                 (iteration_id,),
             ).fetchall()
             return [_row_to_subitem(r) for r in rows]
+
+    def subitem_progress_map(self, project_id: str) -> dict[str, dict[str, int]]:
+        """批量聚合项目内各 feature 的子需求完成进度。
+
+        ``feature -> {"done": n, "total": m}``。一条 SQL 跨当前项目全部迭代统计，
+        避免为每个 feature 单独查询（树形 / 时间聚合多个 feature 一次性回填）。
+        """
+        with self._db.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.feature,
+                       COUNT(s.id)                                 AS total,
+                       SUM(CASE WHEN s.status = 'done' THEN 1 ELSE 0 END) AS done
+                FROM requirement_subitems s
+                JOIN requirements r ON s.iteration_id = r.id
+                WHERE r.project_id = ? AND r.feature <> ''
+                GROUP BY r.feature
+                """,
+                (project_id,),
+            ).fetchall()
+        return {
+            r["feature"]: {"done": int(r["done"] or 0), "total": int(r["total"])}
+            for r in rows
+        }
 
     def create_subitem(self, input_: CreateSubitemInput) -> RequirementSubitem:
         """新建子需求（seq = 该迭代 max(seq)+1）。deferred 强制清空 deadline。"""

@@ -3,13 +3,16 @@ import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { useRequirementsStore } from '@/stores/requirements'
+import { useSettingsStore } from '@/stores/settings'
 import { groupByDate } from '@/composables/useRequirementByDate'
 import { STATUS_LABEL } from '@/types/requirement'
 import type { RequirementItem, RequirementStatus } from '@/types'
 import { formatDate } from '@/utils'
 
 const store = useRequirementsStore()
-const { filteredItems } = storeToRefs(store)
+const settingsStore = useSettingsStore()
+const { filteredItems, currentProgressMap } = storeToRefs(store)
+const { showSubitemProgressInTree } = storeToRefs(settingsStore)
 
 const groups = computed(() => groupByDate(filteredItems.value))
 
@@ -22,6 +25,11 @@ watch(
   },
   { immediate: true },
 )
+
+/** 开关开启时返回该功能子需求进度，否则 null。 */
+function subitemProgress(feature: string) {
+  return showSubitemProgressInTree.value ? currentProgressMap.value[feature] ?? null : null
+}
 
 function onRowClick(item: RequirementItem) {
   store.openFeature(item.feature)
@@ -68,7 +76,15 @@ async function onStatusChange(item: RequirementItem, status: RequirementStatus) 
             @click="onRowClick(item)"
           >
             <div class="req-info">
-              <span class="req-feature">{{ item.feature || '（未命名）' }}</span>
+              <span class="req-feature">
+                {{ item.feature || '（未命名）' }}
+                <span
+                  v-if="subitemProgress(item.feature)"
+                  class="progress-badge"
+                >
+                  {{ subitemProgress(item.feature)!.done }}/{{ subitemProgress(item.feature)!.total }}
+                </span>
+              </span>
               <div class="req-meta">
                 <el-tag
                   v-if="item.status === 'done'"
@@ -180,6 +196,12 @@ async function onStatusChange(item: RequirementItem, status: RequirementStatus) 
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.progress-badge {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 400;
 }
 .req-content {
   font-size: 12px;

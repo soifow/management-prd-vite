@@ -73,7 +73,7 @@ class AppSettings(BaseModel):
 
     show_subitem_progress_in_tree: bool = Field(
         default=False,
-        description="树形功能节点是否显示子需求进度 (done/total)；关则仅功能详情页显示",
+        description="功能节点是否显示子需求进度 (done/total)（树形 + 时间聚合）；关则仅功能详情页显示",
     )
 
     # ── LLM 智能导入配置 ──
@@ -110,6 +110,18 @@ class AppSettings(BaseModel):
         ge=1,
         le=100,
         description="导入备份自动清理保留数量（保留最近 N 个；schema 迁移备份永久保留不参与清理）",
+    )
+
+    hide_bug_only_projects: bool = Field(
+        default=False,
+        description="需求侧默认是否隐藏仅存 bug 的项目（bug 侧始终显示全部项目）",
+    )
+
+    feature_name_max_length: int = Field(
+        default=12,
+        ge=0,
+        description="功能名显示截断长度：超过该长度则截断并加省略号（仅影响显示，不影响存储）。"
+        "用于功能详情头部与功能下拉框选项，防止超长功能名撑乱布局。0 表示不截断。",
     )
 
     @model_validator(mode="after")

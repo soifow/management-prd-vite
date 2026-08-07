@@ -154,6 +154,12 @@ export const deleteRequirement = (itemId: string): Promise<boolean> =>
 export const listSubitems = (iterationId: string): Promise<RequirementSubitem[]> =>
   invoke(() => bridge().list_subitems(iterationId))
 
+/** 批量获取项目内各 feature 的子需求进度（feature -> {done,total}）。 */
+export const listSubitemProgress = (
+  projectId: string,
+): Promise<Record<string, { done: number; total: number }>> =>
+  invoke(() => bridge().subitem_progress_map(projectId))
+
 export const createSubitem = (
   iterationId: string,
   input: CreateSubitemInput,

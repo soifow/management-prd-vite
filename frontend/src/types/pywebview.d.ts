@@ -66,6 +66,10 @@ export interface PyWebViewApi {
 
   // ── 迭代级子需求 ──
   list_subitems(iteration_id: string): Promise<RequirementSubitem[] | ApiErrorEnvelope>
+  /** 批量聚合项目内各 feature 的子需求进度（feature -> {done,total}）。 */
+  subitem_progress_map(
+    project_id: string,
+  ): Promise<Record<string, { done: number; total: number }> | ApiErrorEnvelope>
   create_subitem(
     iteration_id: string,
     input: CreateSubitemInput,

@@ -8,20 +8,28 @@ import { MD_EDITOR_PROPS } from '@/constants/md-editor'
 import { IPixelTrash } from '@/constants/icons'
 import { useBugsStore } from '@/stores/bugs'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
 import {
   BUG_STATUS_LABEL,
   LEVEL_LABEL,
   LEVEL_TAG_TYPE,
 } from '@/types/bug'
 import type { BugItem, BugLevel, BugLinkInfo, BugStatus } from '@/types'
-import { formatDate } from '@/utils'
+import { formatDate, truncateText } from '@/utils'
 
 const emit = defineEmits<{ (e: 'jump-requirement', link: BugLinkInfo): void }>()
 
 const bugsStore = useBugsStore()
 const projectsStore = useProjectsStore()
+const settingsStore = useSettingsStore()
 const { currentBug, linkedInfo, modules } = storeToRefs(bugsStore)
 const { activeProjectId } = storeToRefs(projectsStore)
+
+// 功能名显示截断长度（来自设置；0=不截断）
+const featureNameMaxLen = computed(() => settingsStore.featureNameMaxLength)
+function displayFeatureName(name: string): string {
+  return truncateText(name, featureNameMaxLen.value)
+}
 
 // 编辑缓冲（避免直接改 store 引用）
 const bufferModuleNames = ref<string[]>([])
@@ -269,7 +277,7 @@ function onIterationChange(id: string | null) {
               placeholder="选择功能"
               style="width: 100%; margin-bottom: 8px"
             >
-              <el-option v-for="f in features" :key="f" :label="f" :value="f" />
+              <el-option v-for="f in features" :key="f" :label="displayFeatureName(f)" :value="f" />
             </el-select>
             <el-select
               :model-value="bufferLinkedId"
