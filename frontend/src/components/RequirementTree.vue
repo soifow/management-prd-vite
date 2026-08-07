@@ -54,10 +54,11 @@ function onOpenFeature(feature: string) {
           </span>
         </template>
 
-        <div
+        <el-card
           v-for="f in g.features"
           :key="`${g.module}-${f.feature}`"
           class="feature-card"
+          shadow="hover"
           @click="onOpenFeature(f.feature)"
         >
           <div class="feature-name">
@@ -78,7 +79,7 @@ function onOpenFeature(feature: string) {
             </span>
             <span class="arrow">›</span>
           </div>
-        </div>
+        </el-card>
       </el-collapse-item>
     </el-collapse>
   </div>
@@ -102,7 +103,8 @@ function onOpenFeature(feature: string) {
 }
 .module-collapse :deep(.el-collapse-item__wrap) {
   border: none;
-  padding: 8px 0 0 16px;
+  /* 右/下留出空间，让卡片悬停阴影不被 overflow:hidden 裁剪 */
+  padding: 8px 12px 12px 16px;
 }
 .module-title {
   display: flex;
@@ -113,18 +115,19 @@ function onOpenFeature(feature: string) {
   margin-left: 4px;
 }
 .feature-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 10px 14px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   cursor: pointer;
-  transition:
-    border-color 0.15s,
-    background 0.15s;
+  transition: box-shadow 0.2s;
 }
-.feature-card:hover {
-  border-color: #409eff;
-  background: #f5f9ff;
+/* 悬停：仅阴影浮现，边框与背景保持不变 */
+.feature-card.is-hover-shadow:hover,
+.feature-card.is-hover-shadow:focus {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 6px 16px rgba(0, 0, 0, 0.1);
+}
+.feature-card :deep(.el-card__body) {
+  padding: 10px 14px;
 }
 .feature-name {
   font-size: 14px;

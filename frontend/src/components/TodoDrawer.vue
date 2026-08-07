@@ -142,10 +142,11 @@ function onClickItem(item: TodoReminder) {
           :title="`${g.label} (${g.items.length})`"
           :style="groupHeaderStyle(g)"
         >
-          <div
+          <el-card
             v-for="item in g.items"
             :key="item.item_id"
             class="todo-card"
+            shadow="hover"
             @click="onClickItem(item)"
           >
             <div class="card-row meta">
@@ -164,7 +165,7 @@ function onClickItem(item: TodoReminder) {
             <div v-if="item.completion_deadline" class="card-row deadline">
               🗓 {{ formatDate(item.completion_deadline) }}
             </div>
-          </div>
+          </el-card>
         </el-collapse-item>
       </el-collapse>
     </div>
@@ -203,20 +204,24 @@ function onClickItem(item: TodoReminder) {
   padding: 8px 12px 12px;
 }
 .todo-card {
-  padding: 10px 12px;
   margin-bottom: 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
   background: #ffffff;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.2s;
 }
+/* 悬停只加阴影 + 边框微变，背景保持白色不变 */
 .todo-card:hover {
-  background: #f3f4f6;
   border-color: #d1d5db;
+}
+.todo-card.is-hover-shadow:hover,
+.todo-card.is-hover-shadow:focus {
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
 }
 .todo-card:last-child {
   margin-bottom: 0;
+}
+.todo-card :deep(.el-card__body) {
+  padding: 10px 12px;
 }
 .card-row {
   display: flex;

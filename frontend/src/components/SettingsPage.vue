@@ -539,11 +539,12 @@ async function onDeleteBackup(id: string, createdAt: string) {
         @touchstart.passive="markUserScroll"
         @keydown.passive="markUserScroll"
       >
-        <section
+        <el-card
           v-for="g in sortedGroups"
           :key="g.key"
           :id="`setting-section-${g.key}`"
           class="settings-card"
+          shadow="never"
         >
           <!-- 存储位置 -->
           <template v-if="g.key === 'storage'">
@@ -805,7 +806,12 @@ async function onDeleteBackup(id: string, createdAt: string) {
               暂无导入备份（首次导入或保留策略已清空旧备份）
             </div>
             <div v-else class="backup-list">
-              <div v-for="b in importBackups" :key="b.id" class="backup-item">
+              <el-card
+                v-for="b in importBackups"
+                :key="b.id"
+                class="backup-item"
+                shadow="never"
+              >
                 <div class="backup-main">
                   <div class="backup-row">
                     <el-tag
@@ -832,10 +838,10 @@ async function onDeleteBackup(id: string, createdAt: string) {
                     删除
                   </el-button>
                 </div>
-              </div>
+              </el-card>
             </div>
           </template>
-        </section>
+        </el-card>
       </div>
     </div>
 
@@ -943,12 +949,11 @@ async function onDeleteBackup(id: string, createdAt: string) {
   border-radius: 0;
 }
 .settings-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 16px 20px;
   margin-bottom: 16px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+}
+.settings-card :deep(.el-card__body) {
+  padding: 16px 20px;
 }
 .section-title {
   font-size: 15px;
@@ -1060,15 +1065,12 @@ async function onDeleteBackup(id: string, createdAt: string) {
   flex-direction: column;
   gap: 8px;
 }
-.backup-item {
+.backup-item :deep(.el-card__body) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #ffffff;
   gap: 12px;
+  padding: 10px 12px;
 }
 .backup-main {
   flex: 1;
